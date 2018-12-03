@@ -50,6 +50,7 @@ func (rs *Receivers) ReqSession(mfst *dag.Manifest) (sid string, diff *dag.Manif
 		cancel()
 		return
 	}
+	fmt.Printf("created receive. sid: %s. diff: %d nodes\n", r.sid, len(r.diff.Nodes))
 
 	rs.lock.Lock()
 	defer rs.lock.Unlock()

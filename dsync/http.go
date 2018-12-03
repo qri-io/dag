@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 
 	"github.com/qri-io/dag"
@@ -33,14 +34,18 @@ func (rem *HTTPRemote) ReqSession(mfst *dag.Manifest) (sid string, diff *dag.Man
 	}
 
 	if res.StatusCode != http.StatusOK {
-		err = fmt.Errorf("remote repsonse: %d", res.StatusCode)
+		var msg string
+		if data, err := ioutil.ReadAll(res.Body); err == nil {
+			msg = string(data)
+		}
+		err = fmt.Errorf("remote repsonse: %d %s", res.StatusCode, msg)
 		return
 	}
 
 	sid = res.Header.Get("sid")
 	diff = &dag.Manifest{}
 	err = json.NewDecoder(res.Body).Decode(diff)
-
+	fmt.Printf("sid: %s. sending %d blocks\n", sid, len(diff.Nodes))
 	return
 }
 
@@ -67,9 +72,14 @@ func (rem *HTTPRemote) PutBlock(sid, hash string, data []byte) Response {
 	}
 
 	if res.StatusCode != http.StatusOK {
+		var msg string
+		if data, err := ioutil.ReadAll(res.Body); err == nil {
+			msg = string(data)
+		}
 		return Response{
 			Hash:   hash,
-			Status: StatusRetry,
+			Status: StatusErrored,
+			Err:    fmt.Errorf("remote error: %d %s", res.StatusCode, msg),
 		}
 	}
 

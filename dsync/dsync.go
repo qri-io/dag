@@ -57,9 +57,17 @@ type Send struct {
 	progCh      chan dag.Completion
 	blocksCh    chan string
 	responses   chan Response
+	retries     chan string
 }
 
-const defaultSendParallelism = 4
+const (
+	// default to parallelism of 4, which roughly matches browsers
+	defaultSendParallelism = 4
+	// total number of retries to attempt before send is considered faulty
+	// TODO (b5): this number should be retries *per object*, and a much lower
+	// number, like 5.
+	maxRetries = 25
+)
 
 // NewSend gets a local path to a remote place using a local NodeGetter and a remote
 func NewSend(ctx context.Context, lng ipld.NodeGetter, mfst *dag.Manifest, remote Remote) (*Send, error) {
@@ -74,9 +82,10 @@ func NewSend(ctx context.Context, lng ipld.NodeGetter, mfst *dag.Manifest, remot
 		lng:         lng,
 		remote:      remote,
 		parallelism: parallelism,
-		blocksCh:    make(chan string, 8),
-		progCh:      make(chan dag.Completion, 8),
+		blocksCh:    make(chan string),
+		progCh:      make(chan dag.Completion),
 		responses:   make(chan Response),
+		retries:     make(chan string),
 	}
 	return ps, nil
 }
@@ -91,10 +100,16 @@ func (snd *Send) Do() (err error) {
 	snd.prog = dag.NewCompletion(snd.mfst, snd.diff)
 	go snd.completionChanged()
 
+	// response said we have nothing to send. all done
+	if len(snd.diff.Nodes) == 0 {
+		return nil
+	}
+
 	// create senders
 	sends := make([]sender, snd.parallelism)
 	for i := 0; i < snd.parallelism; i++ {
 		sends[i] = sender{
+			id:        i,
 			sid:       snd.sid,
 			ctx:       snd.ctx,
 			blocksCh:  snd.blocksCh,
@@ -109,9 +124,10 @@ func (snd *Send) Do() (err error) {
 
 	// receive block responses
 	go func(sends []sender, errCh chan error) {
-		for {
-			select {
-			case r := <-snd.responses:
+		// handle *all* responses from senders. it's very important that this loop
+		// never block, so all responses are handled in their own goroutine
+		for res := range snd.responses {
+			go func(r Response) {
 				switch r.Status {
 				case StatusOk:
 					// this is the only place we should modify progress after creation
@@ -126,16 +142,32 @@ func (snd *Send) Do() (err error) {
 						return
 					}
 				case StatusErrored:
+					fmt.Println(r.Err)
+					errCh <- r.Err
 					for _, s := range sends {
 						s.stop()
 					}
-					errCh <- r.Err
 				case StatusRetry:
-					snd.blocksCh <- r.Hash
+					snd.retries <- r.Hash
 				}
-			}
+			}(res)
 		}
 	}(sends, errCh)
+
+	go func(errCh chan error) {
+		retries := 0
+		for hash := range snd.retries {
+			retries++
+			if retries == maxRetries {
+				for _, s := range sends {
+					s.stop()
+				}
+				errCh <- fmt.Errorf("max %d retries reached", retries)
+				return
+			}
+			snd.blocksCh <- hash
+		}
+	}(errCh)
 
 	// fill queue with missing blocks to kick off the send
 	go func() {
@@ -159,6 +191,7 @@ func (snd *Send) completionChanged() {
 
 // sender is a parallelizable, stateless struct that sends blocks
 type sender struct {
+	id        int
 	sid       string
 	ctx       context.Context
 	lng       ipld.NodeGetter
@@ -173,36 +206,44 @@ func (s sender) start() {
 		for {
 			select {
 			case hash := <-s.blocksCh:
-				id, err := cid.Parse(hash)
-				if err != nil {
-					s.responses <- Response{
-						Hash:   hash,
-						Status: StatusErrored,
-						Err:    err,
+				// here we're syncronizing multiple channels in a select, and in this case
+				// we're (probably) firing off a blocking call to s.remote.PutBlock that's
+				// waiting on a network response. This can prevent reading on stopCh & ctx.Done
+				// which is very bad, so we fire a goroutine to prevent the select loop from
+				// ever blocking. Concurrency is fun!
+				go func() {
+					id, err := cid.Parse(hash)
+					if err != nil {
+						s.responses <- Response{
+							Hash:   hash,
+							Status: StatusErrored,
+							Err:    err,
+						}
 					}
-				}
-				node, err := s.lng.Get(s.ctx, id)
-				if err != nil {
-					s.responses <- Response{
-						Hash:   hash,
-						Status: StatusErrored,
-						Err:    err,
+					node, err := s.lng.Get(s.ctx, id)
+					if err != nil {
+						s.responses <- Response{
+							Hash:   hash,
+							Status: StatusErrored,
+							Err:    err,
+						}
+						return
 					}
-					continue
-				}
-				s.responses <- s.remote.PutBlock(s.sid, hash, node.RawData())
+					s.responses <- s.remote.PutBlock(s.sid, hash, node.RawData())
+				}()
 			case <-s.stopCh:
 				return
 			case <-s.ctx.Done():
 				return
 			}
 		}
-
 	}()
 }
 
 func (s sender) stop() {
-	s.stopCh <- true
+	go func() {
+		s.stopCh <- true
+	}()
 }
 
 // Receive tracks state of receiving a manifest of blocks from a remote
@@ -219,10 +260,14 @@ type Receive struct {
 
 // NewReceive creates a receive state machine
 func NewReceive(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAPI, mfst *dag.Manifest) (*Receive, error) {
-	diff, err := dag.Missing(ctx, lng, mfst)
-	if err != nil {
-		return nil, err
-	}
+	// TODO (b5): ipfs api/v0/get/block doesn't allow checking for local blocks yet
+	// aren't working over ipfs api, so we can't do delta's quite yet. Just send the whole things back
+	diff := mfst
+
+	// diff, err := dag.Missing(ctx, lng, mfst)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	r := &Receive{
 		sid:    randStringBytesMask(10),

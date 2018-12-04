@@ -16,7 +16,7 @@ import (
 	coreiface "gx/ipfs/QmUJYo4etAQqFfSS2rarFAE97eNGB8ej64YkRT2SmsYD4r/go-ipfs/core/coreapi/interface"
 )
 
-// Receivers is a pool of active Receive sessions
+// Receivers keeps a pool of receive sessions for serving as a remote to requesters
 type Receivers struct {
 	ctx  context.Context
 	lng  ipld.NodeGetter
@@ -42,8 +42,8 @@ func NewReceivers(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.Block
 	}
 }
 
-// ReqSession initiates a receive session
-func (rs *Receivers) ReqSession(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
+// ReqSend initiates a receive session
+func (rs *Receivers) ReqSend(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
 	ctx, cancel := context.WithDeadline(rs.ctx, time.Now().Add(rs.TTLDur))
 	r, err := NewReceive(ctx, rs.lng, rs.bapi, mfst)
 	if err != nil {
@@ -85,6 +85,16 @@ func (rs *Receivers) PutBlock(sid, hash string, data []byte) Response {
 	return res
 }
 
+// ReqManifest asks a remote source for a DAG manifest with who's root id is path
+func (rs *Receivers) ReqManifest(ctx context.Context, hash string) (mfst *dag.Manifest, err error) {
+	return nil, fmt.Errorf("not finished")
+}
+
+// GetBlock asks the receiver for a single block
+func (rs *Receivers) GetBlock(ctx context.Context, hash string) ([]byte, error) {
+	return nil, fmt.Errorf("not finished")
+}
+
 // HTTPHandler exposes Receivers over HTTP
 func (rs *Receivers) HTTPHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +108,7 @@ func (rs *Receivers) HTTPHandler() http.HandlerFunc {
 			}
 			r.Body.Close()
 
-			sid, diff, err := rs.ReqSession(mfst)
+			sid, diff, err := rs.ReqSend(mfst)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte(err.Error()))

@@ -15,7 +15,7 @@ import (
 )
 
 func TestGraphManifestSizeRato(t *testing.T) {
-	g := NewGraph([]layer{
+	g := newGraph([]layer{
 		{8, 4 * kb},
 		{8, 256 * kb},
 		{100, 256 * kb},
@@ -198,7 +198,7 @@ func (n node) ResolveLink(path []string) (*ipld.Link, []string, error) { return 
 func (n node) Stat() (*ipld.NodeStat, error)                           { return nil, nil }
 func (n node) Tree(path string, depth int) []string                    { return nil }
 
-func NewGraph(layers []layer) (list []ipld.Node) {
+func newGraph(layers []layer) (list []ipld.Node) {
 	root := newNode(2 * kb)
 	list = append(list, root)
 	insert(root, layers, &list)

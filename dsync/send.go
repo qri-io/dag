@@ -101,7 +101,6 @@ func (snd *Send) Do() (err error) {
 						return
 					}
 				case StatusErrored:
-					fmt.Println(r.Err)
 					errCh <- r.Err
 					for _, s := range sends {
 						s.stop()

@@ -51,7 +51,7 @@ type Response struct {
 	Err    error
 }
 
-// HTTPRemote implents the Remote interface via HTTP POST requests
+// HTTPRemote implents the Remote interface via HTTP requests
 type HTTPRemote struct {
 	URL string
 }
@@ -86,7 +86,9 @@ func (rem *HTTPRemote) ReqSend(mfst *dag.Manifest) (sid string, diff *dag.Manife
 	sid = res.Header.Get("sid")
 	diff = &dag.Manifest{}
 	err = json.NewDecoder(res.Body).Decode(diff)
-	fmt.Printf("sid: %s. sending %d blocks\n", sid, len(diff.Nodes))
+	// TODO (b5): this is really terrible to print here, but is *very* helpful info on the CLI
+	// we should pipe a completion channel up to the CLI & remove this
+	fmt.Printf("   sending %d/%d blocks (session id: %s)\n", len(diff.Nodes), len(mfst.Nodes), sid)
 	return
 }
 
@@ -131,13 +133,55 @@ func (rem *HTTPRemote) PutBlock(sid, hash string, data []byte) Response {
 }
 
 // ReqManifest gets a
-func (rem *HTTPRemote) ReqManifest(ctx context.Context, hash string) (mfst *dag.Manifest, err error) {
-	return nil, fmt.Errorf("HTTPRemote.ReqManifest: not finished")
+func (rem *HTTPRemote) ReqManifest(ctx context.Context, id string) (mfst *dag.Manifest, err error) {
+	url := fmt.Sprintf("%s?manifest=%s", rem.URL, id)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if res.StatusCode != http.StatusOK {
+		var msg string
+		if data, err := ioutil.ReadAll(res.Body); err == nil {
+			msg = string(data)
+		}
+		return nil, fmt.Errorf("remote error: %d %s", res.StatusCode, msg)
+	}
+	defer res.Body.Close()
+
+	mfst = &dag.Manifest{}
+	err = json.NewDecoder(res.Body).Decode(mfst)
+	return
 }
 
 // GetBlock fetches a block from HTTPRemote
-func (rem *HTTPRemote) GetBlock(ctx context.Context, hash string) (data []byte, err error) {
-	return nil, fmt.Errorf("HTTPRemote.GetBlock: not finished")
+func (rem *HTTPRemote) GetBlock(ctx context.Context, id string) (data []byte, err error) {
+	url := fmt.Sprintf("%s?block=%s", rem.URL, id)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if res.StatusCode != http.StatusOK {
+		var msg string
+		if data, err := ioutil.ReadAll(res.Body); err == nil {
+			msg = string(data)
+		}
+		return nil, fmt.Errorf("remote error: %d %s", res.StatusCode, msg)
+	}
+	defer res.Body.Close()
+
+	return ioutil.ReadAll(res.Body)
 }
 
 // Receive tracks state of receiving a manifest of blocks from a remote

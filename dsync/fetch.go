@@ -79,6 +79,10 @@ func (f *Fetch) Do() (err error) {
 	go f.completionChanged()
 	// defer close(f.progCh)
 
+	// TODO (b5): this is really terrible to print here, but is *very* helpful info on the CLI
+	// we should pipe a completion channel up to the CLI & remove this
+	fmt.Printf("   fetching %d blocks\n", len(f.diff.Nodes))
+
 	if len(f.diff.Nodes) < f.parallelism {
 		f.parallelism = len(f.diff.Nodes)
 	}

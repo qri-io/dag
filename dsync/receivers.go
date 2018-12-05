@@ -12,22 +12,10 @@ import (
 
 	"github.com/qri-io/dag"
 
+	"gx/ipfs/QmPSQnBKM9g7BaUcZCvswUJVscQ1ipjmwxN5PXCjkp9EQ7/go-cid"
 	ipld "gx/ipfs/QmR7TcHkR9nxkUorfi8XMTAMLUK7GiP64TWWBzY3aacc1o/go-ipld-format"
 	coreiface "gx/ipfs/QmUJYo4etAQqFfSS2rarFAE97eNGB8ej64YkRT2SmsYD4r/go-ipfs/core/coreapi/interface"
 )
-
-// Receivers is a pool of active Receive sessions
-type Receivers struct {
-	ctx  context.Context
-	lng  ipld.NodeGetter
-	bapi coreiface.BlockAPI
-
-	lock    sync.Mutex
-	pool    map[string]*Receive
-	cancels map[string]context.CancelFunc
-
-	TTLDur time.Duration
-}
 
 // NewReceivers allocates a Receivers pointer
 func NewReceivers(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAPI) *Receivers {
@@ -42,8 +30,27 @@ func NewReceivers(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.Block
 	}
 }
 
-// ReqSession initiates a receive session
-func (rs *Receivers) ReqSession(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
+// Receivers keeps a pool of receive sessions for serving as a remote to requesters
+type Receivers struct {
+	ctx       context.Context
+	lng       ipld.NodeGetter
+	bapi      coreiface.BlockAPI
+	infoStore dag.InfoStore
+
+	lock    sync.Mutex
+	pool    map[string]*Receive
+	cancels map[string]context.CancelFunc
+
+	TTLDur time.Duration
+}
+
+// SetInfoStore assigns Receivers InfoStore, which it uses to lookup cached manifests
+func (rs *Receivers) SetInfoStore(is dag.InfoStore) {
+	rs.infoStore = is
+}
+
+// ReqSend initiates a receive session
+func (rs *Receivers) ReqSend(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
 	ctx, cancel := context.WithDeadline(rs.ctx, time.Now().Add(rs.TTLDur))
 	r, err := NewReceive(ctx, rs.lng, rs.bapi, mfst)
 	if err != nil {
@@ -85,7 +92,42 @@ func (rs *Receivers) PutBlock(sid, hash string, data []byte) Response {
 	return res
 }
 
-// HTTPHandler exposes Receivers over HTTP
+// ReqManifest asks a remote source for a DAG manifest with who's root id is path
+func (rs *Receivers) ReqManifest(ctx context.Context, hash string) (mfst *dag.Manifest, err error) {
+	// check cache if one is specified
+	if rs.infoStore != nil {
+		var di *dag.Info
+		if di, err = rs.infoStore.DAGInfo(ctx, hash); err == nil {
+			fmt.Println("using cached manifest")
+			mfst = di.Manifest
+			return
+		}
+	}
+
+	id, err := cid.Parse(hash)
+	if err != nil {
+		return nil, err
+	}
+
+	return dag.NewManifest(ctx, rs.lng, id)
+}
+
+// GetBlock asks the receiver for a single block
+func (rs *Receivers) GetBlock(ctx context.Context, hash string) ([]byte, error) {
+	path, err := coreiface.ParsePath(hash)
+	if err != nil {
+		return nil, err
+	}
+
+	rdr, err := rs.bapi.Get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+
+	return ioutil.ReadAll(rdr)
+}
+
+// HTTPHandler exposes Receivers over HTTP, interlocks with methods exposed by HTTPRemote
 func (rs *Receivers) HTTPHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -98,7 +140,7 @@ func (rs *Receivers) HTTPHandler() http.HandlerFunc {
 			}
 			r.Body.Close()
 
-			sid, diff, err := rs.ReqSession(mfst)
+			sid, diff, err := rs.ReqSend(mfst)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte(err.Error()))
@@ -127,6 +169,39 @@ func (rs *Receivers) HTTPHandler() http.HandlerFunc {
 				w.Write([]byte(res.Err.Error()))
 			} else {
 				w.WriteHeader(http.StatusOK)
+			}
+		case "GET":
+			mfstID := r.FormValue("manifest")
+			blockID := r.FormValue("block")
+			if mfstID == "" && blockID == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte("either manifest or block query params are required"))
+			} else if mfstID != "" {
+				mfst, err := rs.ReqManifest(r.Context(), mfstID)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					w.Write([]byte(err.Error()))
+					return
+				}
+
+				data, err := json.Marshal(mfst)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					w.Write([]byte(err.Error()))
+					return
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(data)
+			} else {
+				data, err := rs.GetBlock(r.Context(), blockID)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					w.Write([]byte(err.Error()))
+					return
+				}
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Write(data)
 			}
 		}
 	}

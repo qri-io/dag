@@ -1,5 +1,14 @@
 // Package dag is the base of a family of packages for working with directed acyclic graphs (DAGs)
 // most (if not all) use cases assume the dag is a merkle-tree https://en.wikipedia.org/wiki/Merkle_tree
+//
+// dag package has two external dependencies that are worth developing an understanding of:
+// * cid - github.com/ipfs/go-cid, github.com/ipld/specs
+//   "Content IDentifiers" is a hashing technique that embeds additional info about the hash in question
+// * ipld - github.com/ipfs/go-ipld-format, github.com/ipld/specs
+//   ipld is a linked-data format for content-addressed data
+//
+// def check those out. dag package attempts to interoperate with these interfaces
+// wherever & whenever possible, in the name of compatibility
 package dag
 
 import (
@@ -22,6 +31,21 @@ type Node interface {
 	Links() []*ipld.Link
 	// Size returns the size in bytes of the serialized object
 	Size() (uint64, error)
+}
+
+// NewManifest generates a manifest from an ipld node
+func NewManifest(ctx context.Context, ng ipld.NodeGetter, id cid.Cid) (*Manifest, error) {
+	ms := &mstate{
+		ctx:     ctx,
+		ng:      ng,
+		weights: map[string]int{},
+		links:   [][2]string{},
+		sizes:   map[string]uint64{},
+		m:       &Manifest{},
+	}
+
+	err := ms.makeManifest(id)
+	return ms.m, err
 }
 
 // Manifest is a determinsitc description of a complete directed acyclic graph.
@@ -52,28 +76,18 @@ type Manifest struct {
 	Nodes []string `json:"nodes"` // list if CIDS contained in the DAG
 }
 
-// NewManifest generates a manifest from an ipld node
-func NewManifest(ctx context.Context, ng ipld.NodeGetter, id cid.Cid) (*Manifest, error) {
-	ms := &mstate{
-		ctx:     ctx,
-		ng:      ng,
-		weights: map[string]int{},
-		links:   [][2]string{},
-		sizes:   map[string]uint64{},
-		m:       &Manifest{},
+// RootCID returns the root node as a CID. If for some reason the manifest is empty
+// or the root hash isn't a valid CID, RootCID returns cid.Undef
+func (m *Manifest) RootCID() cid.Cid {
+	if len(m.Nodes) == 0 {
+		return cid.Undef
 	}
-
-	err := ms.makeManifest(id)
-	return ms.m, err
+	id, err := cid.Parse(m.Nodes[0])
+	if err != nil {
+		return cid.Undef
+	}
+	return id
 }
-
-type sortableLinks [][2]int
-
-func (sl sortableLinks) Len() int { return len(sl) }
-func (sl sortableLinks) Less(i, j int) bool {
-	return (1000*(sl[i][0]+1) + (sl[i][1])) < (1000*(sl[j][0]+1) + (sl[j][1]))
-}
-func (sl sortableLinks) Swap(i, j int) { sl[i], sl[j] = sl[j], sl[i] }
 
 // TODO (b5): finish
 // // SubDAG lists all hashes that are a descendant of the root id
@@ -111,6 +125,14 @@ func UnmarshalCBORManifest(data []byte) (m *Manifest, err error) {
 	err = codec.NewDecoder(bytes.NewReader(data), &codec.CborHandle{}).Decode(m)
 	return
 }
+
+type sortableLinks [][2]int
+
+func (sl sortableLinks) Len() int { return len(sl) }
+func (sl sortableLinks) Less(i, j int) bool {
+	return (1000*(sl[i][0]+1) + (sl[i][1])) < (1000*(sl[j][0]+1) + (sl[j][1]))
+}
+func (sl sortableLinks) Swap(i, j int) { sl[i], sl[j] = sl[j], sl[i] }
 
 // mstate is a state machine for generating a manifest
 type mstate struct {
@@ -197,20 +219,7 @@ func (ms *mstate) addNode(node Node, weight *int) (err error) {
 	return nil
 }
 
-// Info is os.FileInfo for dags: a struct that describes important
-// details about a graph. Info builds on a manifest
-//
-// when being sent over the network, the contents of Info should be considered gossip,
-// as Info's are *not* deterministic. This has important implications
-// Info should contain application-specific info about a datset
-type Info struct {
-	// Info is built upon a manifest
-	Manifest *Manifest      `json:"manifest"`
-	Paths    map[string]int `json:"paths,omitempty"` // sections are lists of logical sub-DAGs by positions in the nodes list
-	Sizes    []uint64       `json:"sizes,omitempty"` // sizes of nodes in bytes
-}
-
-// NewInfo creates a
+// NewInfo creates an info with an underlying manifest
 func NewInfo(ctx context.Context, ng ipld.NodeGetter, id cid.Cid) (*Info, error) {
 	ms := &mstate{
 		ctx:     ctx,
@@ -237,6 +246,28 @@ func NewInfo(ctx context.Context, ng ipld.NodeGetter, id cid.Cid) (*Info, error)
 	}
 
 	return di, nil
+}
+
+// Info is os.FileInfo for dags: a struct that describes important
+// details about a graph. Info builds on a manifest.
+//
+// when being sent over the network, the contents of Info should be considered gossip,
+// as Info's are *not* deterministic. This has important implications
+// Info should contain application-specific info about a datset
+type Info struct {
+	// Info is built upon a manifest
+	Manifest *Manifest      `json:"manifest"`
+	Paths    map[string]int `json:"paths,omitempty"` // sections are lists of logical sub-DAGs by positions in the nodes list
+	Sizes    []uint64       `json:"sizes,omitempty"` // sizes of nodes in bytes
+}
+
+// RootCID proxies the manifest RootCID method, protecting against situations where
+// the underlying manifest doesn't exist
+func (i *Info) RootCID() cid.Cid {
+	if i.Manifest == nil {
+		return cid.Undef
+	}
+	return i.Manifest.RootCID()
 }
 
 // Completion tracks the presence of blocks described in a manifest

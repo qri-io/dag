@@ -284,21 +284,21 @@ func (i *Info) RootCID() cid.Cid {
 //
 type Completion []uint16
 
-// NewCompletion constructs a progress from
+// NewCompletion constructs a progress from a diff Manifest
 func NewCompletion(mfst, missing *Manifest) Completion {
-	// fill in progress
 	prog := make(Completion, len(mfst.Nodes))
-	for i := range prog {
-		prog[i] = 100
-	}
 
-	// then set missing blocks to 0
-	for _, miss := range missing.Nodes {
-		for i, hash := range mfst.Nodes {
-			if hash == miss {
-				prog[i] = 0
-			}
+	// Since a manifest its diff have their nodes in the same order
+	// we can leverage that info to only have to iterate through the list of
+	// nodes once:
+	m := 0
+	for i, hash := range mfst.Nodes {
+		if m < len(missing.Nodes) && hash == missing.Nodes[m] {
+			prog[i] = 0
+			m++
+			continue
 		}
+		prog[i] = 100
 	}
 
 	return prog

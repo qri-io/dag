@@ -127,6 +127,10 @@ func (f *Fetch) Do() (err error) {
 					}
 
 					if bs.Path().Cid().String() != res.Hash {
+						// TODO (kasey): should we also remove any other blocks that have been added?
+						// also not catching or reporting the error here, as it seems more important to
+						// inform folks about the mismatch
+						f.bapi.Rm(f.ctx, bs.Path())
 						errCh <- fmt.Errorf("hash integrity mismatch. expected %s, got: %s", bs.Path().Cid().String(), res.Hash)
 					}
 

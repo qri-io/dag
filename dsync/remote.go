@@ -132,7 +132,7 @@ func (rem *HTTPRemote) PutBlock(sid, hash string, data []byte) Response {
 	}
 }
 
-// ReqManifest gets a
+// ReqManifest requests a manifest from a remote source
 func (rem *HTTPRemote) ReqManifest(ctx context.Context, id string) (mfst *dag.Manifest, err error) {
 	url := fmt.Sprintf("%s?manifest=%s", rem.URL, id)
 	req, err := http.NewRequest("GET", url, nil)

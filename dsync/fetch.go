@@ -70,11 +70,18 @@ func (f *Fetch) Do() (err error) {
 		}
 	}
 
-	f.diff, err = dag.Missing(f.ctx, f.lng, f.mfst)
-	if err != nil {
-		return
-	}
-
+	// TODO (ramfox): Right now, Missing uses the nodegetter method Get
+	// if you are online, this method attempts to the get the blocks off
+	// the network, not only locally. This takes a long time and makes
+	// Missing unusable as of right now. Instead, we are passing
+	// NewCompletion an empty diff Manifest. We will be asking the remote
+	// source for the entire list of blocks, and although in certain cases
+	// this may be redundant, it is ultimately faster until we can change Missing
+	// f.diff, err = dag.Missing(f.ctx, f.lng, f.mfst)
+	// if err != nil {
+	// 	return
+	// }
+	f.diff = &dag.Manifest{Nodes: f.mfst.Nodes}
 	f.prog = dag.NewCompletion(f.mfst, f.diff)
 	go f.completionChanged()
 	// defer close(f.progCh)

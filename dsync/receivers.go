@@ -81,6 +81,22 @@ func (rs *Receivers) PutBlock(sid, hash string, data []byte) Response {
 	res := r.ReceiveBlock(hash, bytes.NewReader(data))
 
 	if res.Status == StatusOk && r.Complete() {
+		// TODO (b5): move this into a "finalizeReceive" method on receivers
+		// This code will also need to be called if someone tries to sync a DAG that requires
+		// no blocks for an early termination, ensuring that we cache a dag.Info in that case
+		// as well
+		if rs.infoStore != nil {
+			di := &dag.Info{
+				Manifest: r.mfst,
+			}
+			if err := rs.infoStore.PutDAGInfo(context.Background(), r.mfst.Nodes[0], di); err != nil {
+				return Response{
+					Hash:   hash,
+					Status: StatusErrored,
+					Err:    err,
+				}
+			}
+		}
 		defer func() {
 			rs.lock.Lock()
 			rs.cancels[sid]()

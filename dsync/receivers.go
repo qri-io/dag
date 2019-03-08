@@ -49,7 +49,8 @@ func (rs *Receivers) SetInfoStore(is dag.InfoStore) {
 	rs.infoStore = is
 }
 
-// ReqSend initiates a receive session
+// ReqSend takes a manifest sent by a remote and initiates a receive session
+// It returns a manifest/diff of the blocks the reciever needs to have a complete DAG
 func (rs *Receivers) ReqSend(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
 	ctx, cancel := context.WithDeadline(rs.ctx, time.Now().Add(rs.TTLDur))
 	r, err := NewReceive(ctx, rs.lng, rs.bapi, mfst)
@@ -67,7 +68,10 @@ func (rs *Receivers) ReqSend(mfst *dag.Manifest) (sid string, diff *dag.Manifest
 	return r.sid, r.diff, nil
 }
 
-// PutBlock adds one block in a receive session
+// PutBlock adds one block to the local node that was sent by the remote node
+// It notes in the Receive which nodes have been added
+// When the DAG is complete, it puts the manifest into a DAG info and the
+// DAG info into an infoStore
 func (rs *Receivers) PutBlock(sid, hash string, data []byte) Response {
 	r, ok := rs.pool[sid]
 	if !ok {
@@ -78,6 +82,7 @@ func (rs *Receivers) PutBlock(sid, hash string, data []byte) Response {
 		}
 	}
 
+	// ReceiveBlock accepts a block from the sender, placing it in the local blockstore
 	res := r.ReceiveBlock(hash, bytes.NewReader(data))
 
 	if res.Status == StatusOk && r.Complete() {
@@ -108,7 +113,10 @@ func (rs *Receivers) PutBlock(sid, hash string, data []byte) Response {
 	return res
 }
 
-// ReqManifest asks a remote source for a DAG manifest with who's root id is path
+// ReqManifest gets a hash from a remote source, and returns a manifest of the DAG (whose
+// root is the given hash)
+// If the manifest has already been created, it returns the cached manifest from the infoStore
+// If not, it generates a manifest from the DAG
 func (rs *Receivers) ReqManifest(ctx context.Context, hash string) (mfst *dag.Manifest, err error) {
 	// check cache if one is specified
 	if rs.infoStore != nil {
@@ -128,7 +136,7 @@ func (rs *Receivers) ReqManifest(ctx context.Context, hash string) (mfst *dag.Ma
 	return dag.NewManifest(ctx, rs.lng, id)
 }
 
-// GetBlock asks the receiver for a single block
+// GetBlock returns a single block from the store
 func (rs *Receivers) GetBlock(ctx context.Context, hash string) ([]byte, error) {
 	path, err := coreiface.ParsePath(hash)
 	if err != nil {

@@ -11,7 +11,7 @@ import (
 	coreiface "gx/ipfs/QmUJYo4etAQqFfSS2rarFAE97eNGB8ej64YkRT2SmsYD4r/go-ipfs/core/coreapi/interface"
 )
 
-// NewFetch initiates a fetch for a DAG at id from a remote
+// NewFetch initiates a fetch for a DAG by id from a remote node
 func NewFetch(ctx context.Context, id string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (fetch *Fetch, err error) {
 	f := &Fetch{
 		ctx:         ctx,
@@ -39,6 +39,10 @@ func NewFetchWithManifest(ctx context.Context, mfst *dag.Manifest, lng ipld.Node
 }
 
 // Fetch is a request to download a DAG from a remote
+// Fetch will only attempt to get blocks the local node does not
+// already have, aka, the diff.
+// Fetch coordinates block requests, fetching in parallel
+// and keeping track of what has been successfully fetched
 type Fetch struct {
 	path        string
 	mfst        *dag.Manifest
@@ -62,6 +66,35 @@ type FetchRes struct {
 }
 
 // Do executes the fetch
+// First it requests a manifest from the remote node
+// It determines the progress already made
+// It begins to fetch the blocks in parallel:
+// 		- we create a number of fetchers
+//    - these fetchers listen for incoming hashes on the request channel
+//      they request the blocks of these hash from the remote & send the responses
+//      to the response channel
+//    - we create an error channel, sending anything on this channel triggers an end
+//      to the while process
+//    - we then create loop that listens on the response channel for
+//      fetch responses:
+//      - if there is a valid response, we put the incoming block into our local store
+//      - if there is an error response, we send the error over the error channel
+//      - if we have finished fetching all the blocks, we send nil over the error channel
+//      - if at anytime we get a timeout aka an alert from context.Done(), we
+//        also send over the error response
+//    - we set up a loop that actually fills the request
+//      channel with hashes we want the fetcher to fetch
+//    - These hashes are read by the fetchers in parallel, they send the requests the
+//      to the remote
+//
+// so basically three main things:
+//   1) we set up the process for fetching the blocks from the remote
+//   2) we set up the process for handling the responses from the remote
+//   		(putting the blocks into the local store, erroring, triggering
+//       a completion when all blocks have been fetched, or triggering a
+//       timeout)
+//   3) we set up the process for telling the fetchers which blocks to
+//      request
 func (f *Fetch) Do() (err error) {
 	if f.mfst == nil {
 		// request a manifest from the remote if we don't have one
@@ -143,6 +176,9 @@ func (f *Fetch) Do() (err error) {
 							f.prog[i] = 100
 						}
 					}
+					// why does this happen in a go process?
+					// is it because in order to talk over channels
+					// you can't be in the same process?
 					go f.completionChanged()
 					if f.prog.Complete() {
 						errCh <- nil
@@ -169,6 +205,7 @@ func (f *Fetch) completionChanged() {
 	f.progCh <- f.prog
 }
 
+// fetcher is a parallelizable, stateless struct that fetches blocks
 type fetcher struct {
 	id     int
 	remote Remote
@@ -178,6 +215,10 @@ type fetcher struct {
 	stopCh chan bool
 }
 
+// start has the fetcher listen for hashes coming into the request channel
+// it then get's a block from the remote, and passes the response to the
+// response channel
+// If we get a call on the stop channel, we end the process.
 func (f fetcher) start() {
 	for {
 		select {

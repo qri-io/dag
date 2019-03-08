@@ -29,6 +29,14 @@ const (
 )
 
 // Remote is an interface for a source that can be synced to & from
+// The main confusing thing about this package is the difference between
+// the HTTPremote struct and the Recievers struct.
+// They both satisfy the remote interface, but do inverse things:
+// eg, HTTPremote ReqSend sends a manifest and gets back a diff
+// the Receivers ReqSend accepts the manifest and returns the diff
+// It should maybe be called handleReqSend
+// Perhaps a new interface called Receivers that has HandleReqSend, HandlePutBlock, HandleReqManifest,
+// HandleGetBlock, and Handler (that exposes the endpoint)
 type Remote interface {
 	// ReqSend requests a new send session from the remote, which will return a
 	// delta manifest of blocks the remote needs and a session id that must
@@ -52,11 +60,14 @@ type Response struct {
 }
 
 // HTTPRemote implents the Remote interface via HTTP requests
+// This is where we define the system by which we
+// request manifests and blocks from and send manifests and blocks to a remote sourse
+// In this case, we are asking over HTTP
 type HTTPRemote struct {
 	URL string
 }
 
-// ReqSend initiates a send session
+// ReqSend initiates a send session. It sends a Manifest to a remote source over HTTP
 func (rem *HTTPRemote) ReqSend(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
 	buf := &bytes.Buffer{}
 	if err = json.NewEncoder(buf).Encode(mfst); err != nil {
@@ -79,7 +90,7 @@ func (rem *HTTPRemote) ReqSend(mfst *dag.Manifest) (sid string, diff *dag.Manife
 		if data, err := ioutil.ReadAll(res.Body); err == nil {
 			msg = string(data)
 		}
-		err = fmt.Errorf("remote repsonse: %d %s", res.StatusCode, msg)
+		err = fmt.Errorf("remote response: %d %s", res.StatusCode, msg)
 		return
 	}
 
@@ -125,14 +136,13 @@ func (rem *HTTPRemote) PutBlock(sid, hash string, data []byte) Response {
 			Err:    fmt.Errorf("remote error: %d %s", res.StatusCode, msg),
 		}
 	}
-
 	return Response{
 		Hash:   hash,
 		Status: StatusOk,
 	}
 }
 
-// ReqManifest gets a
+// ReqManifest gets a manifest from a remote source over HTTP
 func (rem *HTTPRemote) ReqManifest(ctx context.Context, id string) (mfst *dag.Manifest, err error) {
 	url := fmt.Sprintf("%s?manifest=%s", rem.URL, id)
 	req, err := http.NewRequest("GET", url, nil)
@@ -159,7 +169,7 @@ func (rem *HTTPRemote) ReqManifest(ctx context.Context, id string) (mfst *dag.Ma
 	return
 }
 
-// GetBlock fetches a block from HTTPRemote
+// GetBlock fetches a block from a remote source over HTTP
 func (rem *HTTPRemote) GetBlock(ctx context.Context, id string) (data []byte, err error) {
 	url := fmt.Sprintf("%s?block=%s", rem.URL, id)
 	req, err := http.NewRequest("GET", url, nil)
@@ -184,7 +194,7 @@ func (rem *HTTPRemote) GetBlock(ctx context.Context, id string) (data []byte, er
 	return ioutil.ReadAll(res.Body)
 }
 
-// Receive tracks state of receiving a manifest of blocks from a remote
+// Receive tracks state of receiving an individual manifest of blocks from a remote
 // TODO (b5): This is session state, and should be renamed to reflect that. ReceiveSession? PushState?
 type Receive struct {
 	sid    string

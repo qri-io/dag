@@ -14,6 +14,7 @@ package dag
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"sort"
 
 	"github.com/ugorji/go/codec"
@@ -101,6 +102,16 @@ func (m *Manifest) RootCID() cid.Cid {
 // 	}
 // 	return nodes
 // }
+
+// IdIndex returns the node index of the id
+func (m *Manifest) IDIndex(id string) (int, error) {
+	for i, node := range m.Nodes {
+		if node == id {
+			return i, nil
+		}
+	}
+	return -1, fmt.Errorf("id not found in Manifest")
+}
 
 // // SubDAGIndex lists all hashes that are a descendant of manifest node index
 // func (m *Manifest) SubDAGIndex(idx int, nodes *[]string) {

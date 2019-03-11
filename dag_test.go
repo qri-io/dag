@@ -88,6 +88,52 @@ func TestNewManifest(t *testing.T) {
 	verifyManifest(t, exp, mf)
 }
 
+func TestIDIndex(t *testing.T) {
+	content = 0
+
+	a := newNode(10) // zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8
+	b := newNode(20) // zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz
+	c := newNode(30) // zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ
+	d := newNode(40) // zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP
+	e := newNode(50) // zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV
+	f := newNode(60) // zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6
+	a.links = []*node{b, c}
+	c.links = []*node{d, e}
+	d.links = []*node{f}
+
+	ctx := context.Background()
+	ng := TestingNodeGetter{[]ipld.Node{a, b, c, d, e, f}}
+	mf, err := NewManifest(ctx, ng, a.Cid())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		id       string
+		expIndex int
+		err      string
+	}{
+		{"bad id", -1, "id not found in Manifest"},
+		{"zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8", 0, ""},
+		{"zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ", 1, ""},
+		{"zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP", 2, ""},
+		{"zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV", 3, ""},
+		{"zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz", 4, ""},
+		{"zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", 5, ""},
+	}
+
+	for i, c := range cases {
+		gotIndex, err := mf.IDIndex(c.id)
+		if err != nil && err.Error() != c.err || err == nil && c.err != "" {
+			t.Errorf("case %d error mismatch, expected '%s', got '%s'", i, c.err, err)
+			continue
+		}
+		if gotIndex != c.expIndex {
+			t.Errorf("case %d index mismatch, expected %d, got %d", i, c.expIndex, gotIndex)
+		}
+	}
+}
+
 func TestNewInfo(t *testing.T) {
 	content = 0
 

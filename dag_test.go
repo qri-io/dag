@@ -88,6 +88,66 @@ func TestNewManifest(t *testing.T) {
 	verifyManifest(t, exp, mf)
 }
 
+func TestSubDAG(t *testing.T) {
+	content = 0
+
+	a := newNode(10) // zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8
+	b := newNode(20) // zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz
+	c := newNode(30) // zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ
+	d := newNode(40) // zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP
+	e := newNode(50) // zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV
+	f := newNode(60) // zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6
+	a.links = []*node{b, c}
+	c.links = []*node{d, e}
+	d.links = []*node{f}
+
+	ctx := context.Background()
+	ng := TestingNodeGetter{[]ipld.Node{a, b, c, d, e, f}}
+	mf, err := NewManifest(ctx, ng, a.Cid())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expSubDAGC := &Manifest{
+		Nodes: []string{
+			"zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ", // c
+			"zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP", // d
+			"zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV", // e
+			"zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", // f
+		},
+		Links: [][2]int{
+			{0, 1}, {0, 2}, {1, 3},
+		},
+	}
+
+	subDAGC, err := SubDAG(mf, "zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ")
+	if err != nil {
+		t.Errorf("unexpected SubDAG error: %s", err)
+	} else {
+		fmt.Printf("\n%+v\n\n", subDAGC)
+		verifyManifest(t, expSubDAGC, subDAGC)
+	}
+
+	expSubDAGD := &Manifest{
+		Nodes: []string{
+			"zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP", // d
+			"zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", // f
+		},
+		Links: [][2]int{
+			{0, 1},
+		},
+	}
+
+	subDAGD, err := SubDAG(mf, "zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP")
+	if err != nil {
+		t.Errorf("unexpected SubDAG error: %s", err)
+	} else {
+		fmt.Printf("\n%+v\n\n", subDAGC)
+		verifyManifest(t, expSubDAGD, subDAGD)
+	}
+
+}
+
 func TestIDIndex(t *testing.T) {
 	content = 0
 

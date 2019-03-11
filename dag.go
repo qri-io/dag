@@ -103,7 +103,103 @@ func (m *Manifest) RootCID() cid.Cid {
 // 	return nodes
 // }
 
-// IdIndex returns the node index of the id
+// SubDAG returns a Manifest of a DAG at a specific hash in an already existing Manifest
+func SubDAG(m *Manifest, id string) (*Manifest, error) {
+	// return nil, fmt.Errorf("yay!")
+	converter, err := newSubDAGConverter(m, id)
+	if err != nil {
+		return nil, err
+	}
+	converter.Convert()
+	return converter.Manifest, nil
+}
+
+func newSubDAGConverter(prevManifest *Manifest, id string) (*subDAGConverter, error) {
+	root, err := prevManifest.IDIndex(id)
+	if err != nil {
+		return nil, err
+	}
+	lastLink := prevManifest.Links[len(prevManifest.Links)-1]
+	return &subDAGConverter{
+		Conversion:         map[int]int{},
+		PrevManifest:       prevManifest,
+		Manifest:           &Manifest{Nodes: []string{}, Links: [][2]int{}},
+		currentParentIndex: 0,
+		Parents:            []int{root},
+		LastBranchIndex:    lastLink[0],
+	}, nil
+}
+
+type subDAGConverter struct {
+	Conversion         map[int]int
+	PrevManifest       *Manifest
+	currentParentIndex int
+	Parents            []int
+	LastBranchIndex    int
+	Manifest           *Manifest
+}
+
+func (s *subDAGConverter) Convert() {
+	for _, link := range s.PrevManifest.Links {
+		fromNode := link[0]
+		toNode := link[1]
+		currentParent := s.CurrentParent()
+		if fromNode < currentParent {
+			continue
+		}
+		if fromNode > currentParent {
+			for {
+				currentParent := s.NextParent()
+				if currentParent == -1 {
+					// have iterated through all the parents!
+					// this means our manifest is complete!
+					return
+				}
+				if currentParent == fromNode {
+					// break out of the forloop and continue
+					// with the Convert function
+					break
+				}
+				// keep iterating through the Parents array
+				continue
+			}
+		}
+		_, fromOk := s.Conversion[fromNode]
+		if !fromOk {
+			convertIndex := len(s.Manifest.Nodes)
+			id := s.PrevManifest.Nodes[fromNode]
+			s.Manifest.Nodes = append(s.Manifest.Nodes, id)
+			s.Conversion[fromNode] = convertIndex
+		}
+		_, toOk := s.Conversion[toNode]
+		if !toOk {
+			convertIndex := len(s.Manifest.Nodes)
+			id := s.PrevManifest.Nodes[toNode]
+			s.Manifest.Nodes = append(s.Manifest.Nodes, id)
+			s.Conversion[toNode] = convertIndex
+		}
+
+		newLink := [2]int{s.Conversion[fromNode], s.Conversion[toNode]}
+		s.Manifest.Links = append(s.Manifest.Links, newLink)
+		if toNode <= s.LastBranchIndex {
+			s.Parents = append(s.Parents, toNode)
+		}
+	}
+}
+
+func (s *subDAGConverter) CurrentParent() int {
+	return s.Parents[s.currentParentIndex]
+}
+
+func (s *subDAGConverter) NextParent() int {
+	s.currentParentIndex++
+	if s.currentParentIndex >= len(s.Parents) {
+		return -1
+	}
+	return s.CurrentParent()
+}
+
+// IDIndex returns the node index of the id
 func (m *Manifest) IDIndex(id string) (int, error) {
 	for i, node := range m.Nodes {
 		if node == id {

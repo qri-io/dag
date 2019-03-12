@@ -124,7 +124,6 @@ func TestSubDAG(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected SubDAG error: %s", err)
 	} else {
-		fmt.Printf("\n%+v\n\n", subDAGC)
 		verifyManifest(t, expSubDAGC, subDAGC)
 	}
 
@@ -142,7 +141,6 @@ func TestSubDAG(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected SubDAG error: %s", err)
 	} else {
-		fmt.Printf("\n%+v\n\n", subDAGC)
 		verifyManifest(t, expSubDAGD, subDAGD)
 	}
 
@@ -241,6 +239,67 @@ func TestNewInfo(t *testing.T) {
 	for i, s := range exp.Sizes {
 		if s != di.Sizes[i] {
 			t.Errorf("sizes index %d mismatch. expected: %d, got: %d", i, s, di.Sizes[i])
+		}
+	}
+}
+
+func TestInfoAtIndex(t *testing.T) {
+	content = 0
+
+	a := newNode(10) // zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8
+	b := newNode(20) // zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz
+	c := newNode(30) // zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ
+	d := newNode(40) // zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP
+	e := newNode(50) // zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV
+	f := newNode(60) // zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6
+	a.links = []*node{b, c}
+	c.links = []*node{d, e}
+	d.links = []*node{f}
+
+	ctx := context.Background()
+	ng := TestingNodeGetter{[]ipld.Node{a, b, c, d, e, f}}
+	di, err := NewInfo(ctx, ng, a.Cid())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	di.Paths = map[string]int{
+		"root": 0,
+		"leaf": 5,
+	}
+
+	expInfoAtC := &Info{
+		Manifest: &Manifest{
+			Nodes: []string{
+				"zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ", // c
+				"zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP", // d
+				"zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV", // e
+				"zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", // f
+			},
+			Links: [][2]int{
+				{0, 1}, {0, 2}, {1, 3},
+			},
+		},
+		Sizes: []uint64{30, 40, 50, 60},
+		Paths: map[string]int{"leaf": 3},
+	}
+
+	infoAtC, err := di.InfoAtIndex(1)
+	if err != nil {
+		t.Errorf("unexpected error: %s", err)
+		return
+	}
+
+	verifyManifest(t, expInfoAtC.Manifest, infoAtC.Manifest)
+
+	if len(expInfoAtC.Sizes) != len(infoAtC.Sizes) {
+		t.Errorf("sizes length mismatch. expected: %d. got: %d", len(expInfoAtC.Sizes), len(infoAtC.Sizes))
+		return
+	}
+
+	for i, s := range expInfoAtC.Sizes {
+		if s != infoAtC.Sizes[i] {
+			t.Errorf("sizes index %d mismatch. expected: %d, got: %d", i, s, infoAtC.Sizes[i])
 		}
 	}
 }

@@ -105,8 +105,14 @@ func (m *Manifest) RootCID() cid.Cid {
 
 // SubDAG returns a Manifest of a DAG at a specific hash in an already existing Manifest
 func SubDAG(m *Manifest, id string) (*Manifest, error) {
-	// return nil, fmt.Errorf("yay!")
-	converter, err := newSubDAGConverter(m, id)
+	info := &Info{
+		Manifest: m,
+	}
+	root, err := m.IDIndex(id)
+	if err != nil {
+		return nil, err
+	}
+	converter, err := newSubDAGConverter(info, root)
 	if err != nil {
 		return nil, err
 	}
@@ -114,19 +120,28 @@ func SubDAG(m *Manifest, id string) (*Manifest, error) {
 	return converter.Manifest, nil
 }
 
-func newSubDAGConverter(prevManifest *Manifest, id string) (*subDAGConverter, error) {
-	root, err := prevManifest.IDIndex(id)
-	if err != nil {
-		return nil, err
+func newSubDAGConverter(prevInfo *Info, root int) (*subDAGConverter, error) {
+	if prevInfo.Manifest == nil {
+		return nil, fmt.Errorf("no manifest provided")
 	}
-	lastLink := prevManifest.Links[len(prevManifest.Links)-1]
+	m := prevInfo.Manifest
+	PrevPaths := map[int]string{}
+	for path, index := range prevInfo.Paths {
+		PrevPaths[index] = path
+	}
+
+	lastLink := m.Links[len(m.Links)-1]
 	return &subDAGConverter{
 		Conversion:         map[int]int{},
-		PrevManifest:       prevManifest,
+		PrevManifest:       m,
 		Manifest:           &Manifest{Nodes: []string{}, Links: [][2]int{}},
 		currentParentIndex: 0,
 		Parents:            []int{root},
 		LastBranchIndex:    lastLink[0],
+		PrevSizes:          prevInfo.Sizes,
+		Sizes:              []uint64{},
+		PrevPaths:          PrevPaths,
+		Paths:              map[string]int{},
 	}, nil
 }
 
@@ -137,6 +152,10 @@ type subDAGConverter struct {
 	Parents            []int
 	LastBranchIndex    int
 	Manifest           *Manifest
+	PrevSizes          []uint64
+	Sizes              []uint64
+	PrevPaths          map[int]string
+	Paths              map[string]int
 }
 
 func (s *subDAGConverter) Convert() {
@@ -169,6 +188,15 @@ func (s *subDAGConverter) Convert() {
 			convertIndex := len(s.Manifest.Nodes)
 			id := s.PrevManifest.Nodes[fromNode]
 			s.Manifest.Nodes = append(s.Manifest.Nodes, id)
+			if s.PrevSizes != nil {
+				s.Sizes = append(s.Sizes, s.PrevSizes[fromNode])
+			}
+			if s.PrevPaths != nil {
+				path, ok := s.PrevPaths[fromNode]
+				if ok {
+					s.Paths[path] = convertIndex
+				}
+			}
 			s.Conversion[fromNode] = convertIndex
 		}
 		_, toOk := s.Conversion[toNode]
@@ -176,6 +204,15 @@ func (s *subDAGConverter) Convert() {
 			convertIndex := len(s.Manifest.Nodes)
 			id := s.PrevManifest.Nodes[toNode]
 			s.Manifest.Nodes = append(s.Manifest.Nodes, id)
+			if s.PrevSizes != nil {
+				s.Sizes = append(s.Sizes, s.PrevSizes[toNode])
+			}
+			if s.PrevPaths != nil {
+				path, ok := s.PrevPaths[toNode]
+				if ok {
+					s.Paths[path] = convertIndex
+				}
+			}
 			s.Conversion[toNode] = convertIndex
 		}
 
@@ -366,6 +403,35 @@ type Info struct {
 	Manifest *Manifest      `json:"manifest"`
 	Paths    map[string]int `json:"paths,omitempty"` // sections are lists of logical sub-DAGs by positions in the nodes list
 	Sizes    []uint64       `json:"sizes,omitempty"` // sizes of nodes in bytes
+}
+
+func (i *Info) InfoAtIndex(idx int) (*Info, error) {
+	converter, err := newSubDAGConverter(i, idx)
+	if err != nil {
+		return nil, err
+	}
+	converter.Convert()
+	return &Info{
+		Manifest: converter.Manifest,
+		Sizes:    converter.Sizes,
+		Paths:    converter.Paths,
+	}, nil
+}
+
+func (i *Info) InfoAtId(id string) (*Info, error) {
+	idx, err := i.Manifest.IDIndex(id)
+	if err != nil {
+		return nil, err
+	}
+	return i.InfoAtIndex(idx)
+}
+
+func (i *Info) InfoAtLabel(label string) (*Info, error) {
+	idx, ok := i.Paths[label]
+	if !ok {
+		return nil, fmt.Errorf("error: label '%s' not found in list of labels", label)
+	}
+	return i.InfoAtIndex(idx)
 }
 
 // RootCID proxies the manifest RootCID method, protecting against situations where

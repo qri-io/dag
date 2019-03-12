@@ -125,9 +125,9 @@ func newSubDAGConverter(prevInfo *Info, root int) (*subDAGConverter, error) {
 		return nil, fmt.Errorf("no manifest provided")
 	}
 	m := prevInfo.Manifest
-	PrevPaths := map[int]string{}
-	for path, index := range prevInfo.Paths {
-		PrevPaths[index] = path
+	PrevLabels := map[int]string{}
+	for path, index := range prevInfo.Labels {
+		PrevLabels[index] = path
 	}
 
 	lastLink := m.Links[len(m.Links)-1]
@@ -140,8 +140,8 @@ func newSubDAGConverter(prevInfo *Info, root int) (*subDAGConverter, error) {
 		LastBranchIndex:    lastLink[0],
 		PrevSizes:          prevInfo.Sizes,
 		Sizes:              []uint64{},
-		PrevPaths:          PrevPaths,
-		Paths:              map[string]int{},
+		PrevLabels:         PrevLabels,
+		Labels:             map[string]int{},
 	}, nil
 }
 
@@ -154,8 +154,8 @@ type subDAGConverter struct {
 	Manifest           *Manifest
 	PrevSizes          []uint64
 	Sizes              []uint64
-	PrevPaths          map[int]string
-	Paths              map[string]int
+	PrevLabels         map[int]string
+	Labels             map[string]int
 }
 
 func (s *subDAGConverter) Convert() {
@@ -191,10 +191,10 @@ func (s *subDAGConverter) Convert() {
 			if s.PrevSizes != nil {
 				s.Sizes = append(s.Sizes, s.PrevSizes[fromNode])
 			}
-			if s.PrevPaths != nil {
-				path, ok := s.PrevPaths[fromNode]
+			if s.PrevLabels != nil {
+				path, ok := s.PrevLabels[fromNode]
 				if ok {
-					s.Paths[path] = convertIndex
+					s.Labels[path] = convertIndex
 				}
 			}
 			s.Conversion[fromNode] = convertIndex
@@ -207,10 +207,10 @@ func (s *subDAGConverter) Convert() {
 			if s.PrevSizes != nil {
 				s.Sizes = append(s.Sizes, s.PrevSizes[toNode])
 			}
-			if s.PrevPaths != nil {
-				path, ok := s.PrevPaths[toNode]
+			if s.PrevLabels != nil {
+				path, ok := s.PrevLabels[toNode]
 				if ok {
-					s.Paths[path] = convertIndex
+					s.Labels[path] = convertIndex
 				}
 			}
 			s.Conversion[toNode] = convertIndex
@@ -401,8 +401,8 @@ func NewInfo(ctx context.Context, ng ipld.NodeGetter, id cid.Cid) (*Info, error)
 type Info struct {
 	// Info is built upon a manifest
 	Manifest *Manifest      `json:"manifest"`
-	Paths    map[string]int `json:"paths,omitempty"` // sections are lists of logical sub-DAGs by positions in the nodes list
-	Sizes    []uint64       `json:"sizes,omitempty"` // sizes of nodes in bytes
+	Labels   map[string]int `json:"labels,omitempty"` // sections are lists of logical sub-DAGs by positions in the nodes list
+	Sizes    []uint64       `json:"sizes,omitempty"`  // sizes of nodes in bytes
 }
 
 func (i *Info) InfoAtIndex(idx int) (*Info, error) {
@@ -414,7 +414,7 @@ func (i *Info) InfoAtIndex(idx int) (*Info, error) {
 	return &Info{
 		Manifest: converter.Manifest,
 		Sizes:    converter.Sizes,
-		Paths:    converter.Paths,
+		Labels:   converter.Labels,
 	}, nil
 }
 
@@ -427,7 +427,7 @@ func (i *Info) InfoAtId(id string) (*Info, error) {
 }
 
 func (i *Info) InfoAtLabel(label string) (*Info, error) {
-	idx, ok := i.Paths[label]
+	idx, ok := i.Labels[label]
 	if !ok {
 		return nil, fmt.Errorf("error: label '%s' not found in list of labels", label)
 	}

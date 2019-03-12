@@ -263,7 +263,7 @@ func TestInfoAtIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	di.Paths = map[string]int{
+	di.Labels = map[string]int{
 		"root": 0,
 		"leaf": 5,
 	}
@@ -280,8 +280,8 @@ func TestInfoAtIndex(t *testing.T) {
 				{0, 1}, {0, 2}, {1, 3},
 			},
 		},
-		Sizes: []uint64{30, 40, 50, 60},
-		Paths: map[string]int{"leaf": 3},
+		Sizes:  []uint64{30, 40, 50, 60},
+		Labels: map[string]int{"leaf": 3},
 	}
 
 	infoAtC, err := di.InfoAtIndex(1)

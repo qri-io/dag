@@ -34,6 +34,12 @@ type Node interface {
 	Size() (uint64, error)
 }
 
+// ErrIndexOutOfRange indicates the index given is out of range of the Manifest
+var ErrIndexOutOfRange = fmt.Errorf("index out of range")
+
+// ErrIDNotFound indicates the id given is not found in the Manifest
+var ErrIDNotFound = fmt.Errorf("id not found in Manifest")
+
 // NewManifest generates a manifest from an ipld node
 func NewManifest(ctx context.Context, ng ipld.NodeGetter, id cid.Cid) (*Manifest, error) {
 	ms := &mstate{
@@ -121,11 +127,11 @@ func SubDAG(m *Manifest, id string) (*Manifest, error) {
 }
 
 func newSubDAGConverter(prevInfo *Info, root int) (*subDAGConverter, error) {
-	if root < 0 || root > len(prevInfo.Manifest.Nodes)-1 {
-		return nil, fmt.Errorf("error: index out of range")
-	}
 	if prevInfo.Manifest == nil {
 		return nil, fmt.Errorf("no manifest provided")
+	}
+	if root < 0 || root > len(prevInfo.Manifest.Nodes)-1 {
+		return nil, ErrIndexOutOfRange
 	}
 	m := prevInfo.Manifest
 	PrevLabels := map[int]string{}
@@ -246,7 +252,7 @@ func (m *Manifest) IDIndex(id string) (int, error) {
 			return i, nil
 		}
 	}
-	return -1, fmt.Errorf("id not found in Manifest")
+	return -1, ErrIDNotFound
 }
 
 // // SubDAGIndex lists all hashes that are a descendant of manifest node index
@@ -412,7 +418,7 @@ type Info struct {
 // it returns an error if the index is out of bounds
 func (i *Info) AddLabel(label string, index int) error {
 	if index < 0 || index > len(i.Manifest.Nodes)-1 {
-		return fmt.Errorf("error: index out of range")
+		return ErrIndexOutOfRange
 	}
 	if i.Labels == nil {
 		i.Labels = map[string]int{}

@@ -267,6 +267,11 @@ func TestInfoAtIndex(t *testing.T) {
 		"root": 0,
 		"leaf": 5,
 	}
+	blankInfo := &Info{}
+	_, err = blankInfo.InfoAtIndex(0)
+	if err == nil || err.Error() != "no manifest provided" {
+		t.Errorf("empty Info error mismatch, expected 'no manifest provided', got: '%s'", err)
+	}
 
 	expInfoAtC := &Info{
 		Manifest: &Manifest{
@@ -285,13 +290,13 @@ func TestInfoAtIndex(t *testing.T) {
 	}
 
 	_, err = di.InfoAtIndex(-1)
-	if err == nil || err.Error() != "error: index out of range" {
-		t.Errorf("error mismatch. expected 'error: index out of range', got: '%s'", err)
+	if err == nil || err.Error() != ErrIndexOutOfRange.Error() {
+		t.Errorf("error mismatch. expected '%s', got: '%s'", ErrIndexOutOfRange, err)
 	}
 
 	_, err = di.InfoAtIndex(10)
-	if err == nil || err.Error() != "error: index out of range" {
-		t.Errorf("error mismatch. expected 'error: index out of range', got: '%s'", err)
+	if err == nil || err.Error() != ErrIndexOutOfRange.Error() {
+		t.Errorf("error mismatch. expected '%s', got: '%s'", ErrIndexOutOfRange, err)
 	}
 
 	infoAtC, err := di.InfoAtIndex(1)
@@ -337,18 +342,18 @@ func TestAddLabel(t *testing.T) {
 	cases := []struct {
 		label string
 		index int
-		err   string
+		err   error
 	}{
-		{"bad index", -1, "error: index out of range"},
-		{"bad index", 6, "error: index out of range"},
-		{"root", 0, ""},
-		{"leaf", 5, ""},
+		{"bad index", -1, ErrIndexOutOfRange},
+		{"bad index", 6, ErrIndexOutOfRange},
+		{"root", 0, nil},
+		{"leaf", 5, nil},
 	}
 
 	for i, c := range cases {
 		err := di.AddLabel(c.label, c.index)
 		if err != nil {
-			if err.Error() != c.err || err == nil && c.err != "" {
+			if err != c.err || err == nil && c.err != nil {
 				t.Errorf("case %d error mismatch, expected '%s', got '%s'", i, c.err, err)
 			}
 			continue
@@ -385,17 +390,18 @@ func TestAddLabelByID(t *testing.T) {
 	}
 
 	cases := []struct {
-		label, id, err string
+		label, id string
+		err       error
 	}{
-		{"bad id", "BAD ID", "id not found in Manifest"},
-		{"root", "zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8", ""},
-		{"leaf", "zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", ""},
+		{"bad id", "BAD ID", ErrIDNotFound},
+		{"root", "zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8", nil},
+		{"leaf", "zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", nil},
 	}
 
 	for i, c := range cases {
 		err := di.AddLabelByID(c.label, c.id)
 		if err != nil {
-			if err.Error() != c.err || err == nil && c.err != "" {
+			if err != c.err || err == nil && c.err != nil {
 				t.Errorf("case %d error mismatch, expected '%s', got '%s'", i, c.err, err)
 			}
 			continue

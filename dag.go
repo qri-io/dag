@@ -121,6 +121,9 @@ func SubDAG(m *Manifest, id string) (*Manifest, error) {
 }
 
 func newSubDAGConverter(prevInfo *Info, root int) (*subDAGConverter, error) {
+	if root < 0 || root > len(prevInfo.Manifest.Nodes)-1 {
+		return nil, fmt.Errorf("error: index out of range")
+	}
 	if prevInfo.Manifest == nil {
 		return nil, fmt.Errorf("no manifest provided")
 	}
@@ -403,6 +406,29 @@ type Info struct {
 	Manifest *Manifest      `json:"manifest"`
 	Labels   map[string]int `json:"labels,omitempty"` // sections are lists of logical sub-DAGs by positions in the nodes list
 	Sizes    []uint64       `json:"sizes,omitempty"`  // sizes of nodes in bytes
+}
+
+// AddLabel adds a label to the list of Info.Labels
+// it returns an error if the index is out of bounds
+func (i *Info) AddLabel(label string, index int) error {
+	if index < 0 || index > len(i.Manifest.Nodes)-1 {
+		return fmt.Errorf("error: index out of range")
+	}
+	if i.Labels == nil {
+		i.Labels = map[string]int{}
+	}
+	i.Labels[label] = index
+	return nil
+}
+
+// AddLabelByID adds a label to the list of Info.Labels
+// it returns an error if the id is not part of the DAG
+func (i *Info) AddLabelByID(label, id string) error {
+	index, err := i.Manifest.IDIndex(id)
+	if err != nil {
+		return err
+	}
+	return i.AddLabel(label, index)
 }
 
 // InfoAtIndex returns a sub-Info, the DAG, sizes, and labels,

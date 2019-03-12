@@ -113,10 +113,7 @@ func (rs *Receivers) PutBlock(sid, hash string, data []byte) Response {
 	return res
 }
 
-// ReqManifest gets a hash from a remote source, and returns a manifest of the DAG (whose
-// root is the given hash)
-// If the manifest has already been created, it returns the cached manifest from the infoStore
-// If not, it generates a manifest from the DAG
+// ReqManifest gets the manifest for a DAG rooted at id, checking any configured cache before falling back to generating a new manifest
 func (rs *Receivers) ReqManifest(ctx context.Context, hash string) (mfst *dag.Manifest, err error) {
 	// check cache if one is specified
 	if rs.infoStore != nil {

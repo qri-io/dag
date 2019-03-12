@@ -10,7 +10,7 @@ import (
 	ipld "gx/ipfs/QmR7TcHkR9nxkUorfi8XMTAMLUK7GiP64TWWBzY3aacc1o/go-ipld-format"
 )
 
-// NewSend initiates a send for a DAG at an id from a local node to a remote node
+// NewSend initiates a send for a DAG at an id from a local to a remote.
 // Send is initiated by the local node
 func NewSend(ctx context.Context, lng ipld.NodeGetter, mfst *dag.Manifest, remote Remote) (*Send, error) {
 	parallelism := defaultSendParallelism
@@ -49,28 +49,28 @@ type Send struct {
 }
 
 // Do executes the send, blocking until complete
-// First we send a manifest to the remote node
-// The remote returns the id of the process, and a diff of the manifest
-// which describes which blocks we need to send
-// We begin to send the blocks in parallel:
-//   - We create a number of senders
-//   - these senders listen on the blocks channel for which blocks
-//     we need to send to the remote
-//   - we create an error channel, sending over this channel will
-//     end the whole process
-//   - we set up a loop that listens for responses from the remote
-//      - if the status is okay, update the progress
-//      - if the status is error, send the error over the errCh
-//      - if the status is retry, push the hash to the list of hashes to retry
-//   - we set up a loop that listens for retries and sends the hash
-//     to retry to the block channel, unless we have reached the maximum
-//     amount of retries
-//   - we set up a loop to push hashes onto the block channel
-//
-// posible TODO (ramfox): it would be great if the fetch and send Do functions
-// followed the same pattern. Specifically the go function that is used to listen for
-// responses
 func (snd *Send) Do() (err error) {
+	// First Do sends a manifest to the remote node
+	// The remote returns the id of the process, and a diff of the manifest
+	// which describes which blocks we need to send
+	// We begin to send the blocks in parallel:
+	//   - We create a number of senders
+	//   - these senders listen on the blocks channel for which blocks
+	//     we need to send to the remote
+	//   - we create an error channel, sending over this channel will
+	//     end the whole process
+	//   - we set up a loop that listens for responses from the remote
+	//      - if the status is okay, update the progress
+	//      - if the status is error, send the error over the errCh
+	//      - if the status is retry, push the hash to the list of hashes to retry
+	//   - we set up a loop that listens for retries and sends the hash
+	//     to retry to the block channel, unless we have reached the maximum
+	//     amount of retries
+	//   - we set up a loop to push hashes onto the block channel
+	//
+	// posible TODO (ramfox): it would be great if the fetch and send Do functions
+	// followed the same pattern. Specifically the go function that is used to listen for
+	// responses
 	snd.sid, snd.diff, err = snd.remote.ReqSend(snd.mfst)
 	if err != nil {
 		return err

@@ -29,14 +29,6 @@ const (
 )
 
 // Remote is an interface for a source that can be synced to & from
-// The main confusing thing about this package is the difference between
-// the HTTPremote struct and the Recievers struct.
-// They both satisfy the remote interface, but do inverse things:
-// eg, HTTPremote ReqSend sends a manifest and gets back a diff
-// the Receivers ReqSend accepts the manifest and returns the diff
-// It should maybe be called handleReqSend
-// Perhaps a new interface called Receivers that has HandleReqSend, HandlePutBlock, HandleReqManifest,
-// HandleGetBlock, and Handler (that exposes the endpoint)
 type Remote interface {
 	// ReqSend requests a new send session from the remote, which will return a
 	// delta manifest of blocks the remote needs and a session id that must
@@ -51,7 +43,7 @@ type Remote interface {
 	GetBlock(ctx context.Context, hash string) (rawdata []byte, err error)
 }
 
-// Response defines the result of sending a block, or attempting to send a block
+// Response defines the result of sending a block, or attempting to send a block.
 // TODO (b5): rename to SendResponse
 type Response struct {
 	Hash   string
@@ -59,10 +51,7 @@ type Response struct {
 	Err    error
 }
 
-// HTTPRemote implents the Remote interface via HTTP requests
-// This is where we define the system by which we
-// request manifests and blocks from and send manifests and blocks to a remote sourse
-// In this case, we are asking over HTTP
+// HTTPRemote implents the Remote interface via HTTP requests.
 type HTTPRemote struct {
 	URL string
 }
@@ -194,7 +183,7 @@ func (rem *HTTPRemote) GetBlock(ctx context.Context, id string) (data []byte, er
 	return ioutil.ReadAll(res.Body)
 }
 
-// Receive tracks state of receiving an individual manifest of blocks from a remote
+// Receive tracks the state of receiving an individual manifest of blocks from a remote.
 // TODO (b5): This is session state, and should be renamed to reflect that. ReceiveSession? PushState?
 type Receive struct {
 	sid    string

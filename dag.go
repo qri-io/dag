@@ -405,6 +405,8 @@ type Info struct {
 	Sizes    []uint64       `json:"sizes,omitempty"`  // sizes of nodes in bytes
 }
 
+// InfoAtIndex returns a sub-Info, the DAG, sizes, and labels,
+// with the given index as root of the DAG
 func (i *Info) InfoAtIndex(idx int) (*Info, error) {
 	converter, err := newSubDAGConverter(i, idx)
 	if err != nil {
@@ -418,7 +420,9 @@ func (i *Info) InfoAtIndex(idx int) (*Info, error) {
 	}, nil
 }
 
-func (i *Info) InfoAtId(id string) (*Info, error) {
+// InfoAtID returns a sub-Info, the DAG, sizes, and labels,
+// with the given id as root of the DAG
+func (i *Info) InfoAtID(id string) (*Info, error) {
 	idx, err := i.Manifest.IDIndex(id)
 	if err != nil {
 		return nil, err
@@ -426,6 +430,8 @@ func (i *Info) InfoAtId(id string) (*Info, error) {
 	return i.InfoAtIndex(idx)
 }
 
+// InfoAtLabel returns a sub-Info, the DAG, sizes, and labels,
+// with the given label as root of the DAG
 func (i *Info) InfoAtLabel(label string) (*Info, error) {
 	idx, ok := i.Labels[label]
 	if !ok {

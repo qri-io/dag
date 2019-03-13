@@ -34,11 +34,13 @@ type Node interface {
 	Size() (uint64, error)
 }
 
-// ErrIndexOutOfRange indicates the index given is out of range of the Manifest
-var ErrIndexOutOfRange = fmt.Errorf("index out of range")
+var (
+	// ErrIndexOutOfRange indicates the index given is out of range of the Manifest
+	ErrIndexOutOfRange = fmt.Errorf("index out of range")
 
-// ErrIDNotFound indicates the id given is not found in the Manifest
-var ErrIDNotFound = fmt.Errorf("id not found in Manifest")
+	// ErrIDNotFound indicates the id given is not found in the Manifest
+	ErrIDNotFound = fmt.Errorf("id not found in Manifest")
+)
 
 // NewManifest generates a manifest from an ipld node
 func NewManifest(ctx context.Context, ng ipld.NodeGetter, id cid.Cid) (*Manifest, error) {
@@ -94,155 +96,6 @@ func (m *Manifest) RootCID() cid.Cid {
 		return cid.Undef
 	}
 	return id
-}
-
-// TODO (b5): finish
-// // SubDAG lists all hashes that are a descendant of the root id
-// func (m *Manifest) SubDAG(id string) []string {
-// 	nodes := []string{id}
-// 	for i, h := range m.Nodes {
-// 		if id == h {
-// 			m.SubDAGIndex(i, &nodes)
-// 			return nodes
-// 		}
-// 	}
-// 	return nodes
-// }
-
-// SubDAG returns a Manifest of a DAG at a specific hash in an already existing Manifest
-func SubDAG(m *Manifest, id string) (*Manifest, error) {
-	info := &Info{
-		Manifest: m,
-	}
-	root, err := m.IDIndex(id)
-	if err != nil {
-		return nil, err
-	}
-	converter, err := newSubDAGConverter(info, root)
-	if err != nil {
-		return nil, err
-	}
-	converter.Convert()
-	return converter.Manifest, nil
-}
-
-func newSubDAGConverter(prevInfo *Info, root int) (*subDAGConverter, error) {
-	if prevInfo.Manifest == nil {
-		return nil, fmt.Errorf("no manifest provided")
-	}
-	if root < 0 || root > len(prevInfo.Manifest.Nodes)-1 {
-		return nil, ErrIndexOutOfRange
-	}
-	m := prevInfo.Manifest
-	PrevLabels := map[int]string{}
-	for path, index := range prevInfo.Labels {
-		PrevLabels[index] = path
-	}
-
-	lastLink := m.Links[len(m.Links)-1]
-	return &subDAGConverter{
-		Conversion:         map[int]int{},
-		PrevManifest:       m,
-		Manifest:           &Manifest{Nodes: []string{}, Links: [][2]int{}},
-		currentParentIndex: 0,
-		Parents:            []int{root},
-		LastBranchIndex:    lastLink[0],
-		PrevSizes:          prevInfo.Sizes,
-		Sizes:              []uint64{},
-		PrevLabels:         PrevLabels,
-		Labels:             map[string]int{},
-	}, nil
-}
-
-type subDAGConverter struct {
-	Conversion         map[int]int
-	PrevManifest       *Manifest
-	currentParentIndex int
-	Parents            []int
-	LastBranchIndex    int
-	Manifest           *Manifest
-	PrevSizes          []uint64
-	Sizes              []uint64
-	PrevLabels         map[int]string
-	Labels             map[string]int
-}
-
-func (s *subDAGConverter) Convert() {
-	for _, link := range s.PrevManifest.Links {
-		fromNode := link[0]
-		toNode := link[1]
-		currentParent := s.CurrentParent()
-		if fromNode < currentParent {
-			continue
-		}
-		if fromNode > currentParent {
-			for {
-				currentParent := s.NextParent()
-				if currentParent == -1 {
-					// have iterated through all the parents!
-					// this means our manifest is complete!
-					return
-				}
-				if currentParent == fromNode {
-					// break out of the forloop and continue
-					// with the Convert function
-					break
-				}
-				// keep iterating through the Parents array
-				continue
-			}
-		}
-		_, fromOk := s.Conversion[fromNode]
-		if !fromOk {
-			convertIndex := len(s.Manifest.Nodes)
-			id := s.PrevManifest.Nodes[fromNode]
-			s.Manifest.Nodes = append(s.Manifest.Nodes, id)
-			if s.PrevSizes != nil {
-				s.Sizes = append(s.Sizes, s.PrevSizes[fromNode])
-			}
-			if s.PrevLabels != nil {
-				path, ok := s.PrevLabels[fromNode]
-				if ok {
-					s.Labels[path] = convertIndex
-				}
-			}
-			s.Conversion[fromNode] = convertIndex
-		}
-		_, toOk := s.Conversion[toNode]
-		if !toOk {
-			convertIndex := len(s.Manifest.Nodes)
-			id := s.PrevManifest.Nodes[toNode]
-			s.Manifest.Nodes = append(s.Manifest.Nodes, id)
-			if s.PrevSizes != nil {
-				s.Sizes = append(s.Sizes, s.PrevSizes[toNode])
-			}
-			if s.PrevLabels != nil {
-				path, ok := s.PrevLabels[toNode]
-				if ok {
-					s.Labels[path] = convertIndex
-				}
-			}
-			s.Conversion[toNode] = convertIndex
-		}
-
-		newLink := [2]int{s.Conversion[fromNode], s.Conversion[toNode]}
-		s.Manifest.Links = append(s.Manifest.Links, newLink)
-		if toNode <= s.LastBranchIndex {
-			s.Parents = append(s.Parents, toNode)
-		}
-	}
-}
-
-func (s *subDAGConverter) CurrentParent() int {
-	return s.Parents[s.currentParentIndex]
-}
-
-func (s *subDAGConverter) NextParent() int {
-	s.currentParentIndex++
-	if s.currentParentIndex >= len(s.Parents) {
-		return -1
-	}
-	return s.CurrentParent()
 }
 
 // IDIndex returns the node index of the id
@@ -435,41 +288,6 @@ func (i *Info) AddLabelByID(label, id string) error {
 		return err
 	}
 	return i.AddLabel(label, index)
-}
-
-// InfoAtIndex returns a sub-Info, the DAG, sizes, and labels,
-// with the given index as root of the DAG
-func (i *Info) InfoAtIndex(idx int) (*Info, error) {
-	converter, err := newSubDAGConverter(i, idx)
-	if err != nil {
-		return nil, err
-	}
-	converter.Convert()
-	return &Info{
-		Manifest: converter.Manifest,
-		Sizes:    converter.Sizes,
-		Labels:   converter.Labels,
-	}, nil
-}
-
-// InfoAtID returns a sub-Info, the DAG, sizes, and labels,
-// with the given id as root of the DAG
-func (i *Info) InfoAtID(id string) (*Info, error) {
-	idx, err := i.Manifest.IDIndex(id)
-	if err != nil {
-		return nil, err
-	}
-	return i.InfoAtIndex(idx)
-}
-
-// InfoAtLabel returns a sub-Info, the DAG, sizes, and labels,
-// with the given label as root of the DAG
-func (i *Info) InfoAtLabel(label string) (*Info, error) {
-	idx, ok := i.Labels[label]
-	if !ok {
-		return nil, fmt.Errorf("error: label '%s' not found in list of labels", label)
-	}
-	return i.InfoAtIndex(idx)
 }
 
 // RootCID proxies the manifest RootCID method, protecting against situations where

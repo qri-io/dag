@@ -56,6 +56,22 @@ func newSubDAGGenerator(prevInfo *Info, root int) *subDAGGenerator {
 	}
 }
 
+func (s *subDAGGenerator) addIndexToSubDAG(index int) {
+	convertIndex := len(s.Manifest.Nodes)
+	id := s.PrevManifest.Nodes[index]
+	s.Manifest.Nodes = append(s.Manifest.Nodes, id)
+	if s.PrevSizes != nil {
+		s.Sizes = append(s.Sizes, s.PrevSizes[index])
+	}
+	if s.InverseLabels != nil {
+		path, ok := s.InverseLabels[index]
+		if ok {
+			s.Labels[path] = convertIndex
+		}
+	}
+	s.Conversion[index] = convertIndex
+}
+
 func (s *subDAGGenerator) convert() (*Info, error) {
 	if s.PrevManifest == nil {
 		return nil, fmt.Errorf("no manifest provided")
@@ -63,6 +79,9 @@ func (s *subDAGGenerator) convert() (*Info, error) {
 	if s.RootIndex < 0 || s.RootIndex >= len(s.PrevManifest.Nodes) {
 		return nil, ErrIndexOutOfRange
 	}
+
+	s.addIndexToSubDAG(s.RootIndex)
+
 	for _, link := range s.PrevManifest.Links {
 		fromNode := link[0]
 		toNode := link[1]
@@ -93,35 +112,11 @@ func (s *subDAGGenerator) convert() (*Info, error) {
 		}
 		_, fromOk := s.Conversion[fromNode]
 		if !fromOk {
-			convertIndex := len(s.Manifest.Nodes)
-			id := s.PrevManifest.Nodes[fromNode]
-			s.Manifest.Nodes = append(s.Manifest.Nodes, id)
-			if s.PrevSizes != nil {
-				s.Sizes = append(s.Sizes, s.PrevSizes[fromNode])
-			}
-			if s.InverseLabels != nil {
-				path, ok := s.InverseLabels[fromNode]
-				if ok {
-					s.Labels[path] = convertIndex
-				}
-			}
-			s.Conversion[fromNode] = convertIndex
+			s.addIndexToSubDAG(fromNode)
 		}
 		_, toOk := s.Conversion[toNode]
 		if !toOk {
-			convertIndex := len(s.Manifest.Nodes)
-			id := s.PrevManifest.Nodes[toNode]
-			s.Manifest.Nodes = append(s.Manifest.Nodes, id)
-			if s.PrevSizes != nil {
-				s.Sizes = append(s.Sizes, s.PrevSizes[toNode])
-			}
-			if s.InverseLabels != nil {
-				path, ok := s.InverseLabels[toNode]
-				if ok {
-					s.Labels[path] = convertIndex
-				}
-			}
-			s.Conversion[toNode] = convertIndex
+			s.addIndexToSubDAG(toNode)
 		}
 
 		newLink := [2]int{s.Conversion[fromNode], s.Conversion[toNode]}

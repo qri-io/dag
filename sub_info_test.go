@@ -30,11 +30,6 @@ func TestInfoAtIndex(t *testing.T) {
 		"root": 0,
 		"leaf": 5,
 	}
-	blankInfo := &Info{}
-	_, err = blankInfo.InfoAtIndex(0)
-	if err == nil || err.Error() != "no manifest provided" {
-		t.Errorf("empty Info error mismatch, expected 'no manifest provided', got: '%s'", err)
-	}
 
 	expSubInfoAtC := &Info{
 		Manifest: &Manifest{
@@ -52,32 +47,55 @@ func TestInfoAtIndex(t *testing.T) {
 		Labels: map[string]int{"leaf": 3},
 	}
 
-	_, err = di.InfoAtIndex(-1)
-	if err == nil || err.Error() != ErrIndexOutOfRange.Error() {
-		t.Errorf("error mismatch. expected '%s', got: '%s'", ErrIndexOutOfRange, err)
+	expSubInfoAtF := &Info{
+		Manifest: &Manifest{
+			Nodes: []string{
+				"zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", // f
+			},
+			Links: [][2]int{},
+		},
+		Sizes:  []uint64{60},
+		Labels: map[string]int{"leaf": 3},
 	}
 
-	_, err = di.InfoAtIndex(10)
-	if err == nil || err.Error() != ErrIndexOutOfRange.Error() {
-		t.Errorf("error mismatch. expected '%s', got: '%s'", ErrIndexOutOfRange, err)
+	cases := []struct {
+		givenInfo *Info
+		index     int
+		expInfo   *Info
+		err       string
+	}{
+		{&Info{}, 0, nil, "no manifest provided"},
+		{di, -1, nil, ErrIndexOutOfRange.Error()},
+		{di, 10, nil, ErrIndexOutOfRange.Error()},
+		{di, 1, expSubInfoAtC, ""},
+		{di, 5, expSubInfoAtF, ""},
 	}
 
-	SubinfoAtC, err := di.InfoAtIndex(1)
-	if err != nil {
-		t.Errorf("unexpected error: %s", err)
-		return
-	}
+	for i, c := range cases {
+		gotInfo, err := c.givenInfo.InfoAtIndex(c.index)
+		// TODO (ramfox): this error logic is not pretty, make it prettier
+		if err != nil {
+			if err.Error() != c.err {
+				t.Errorf("case %d, error mismatched. expected %s. got %s", i, c.err, err)
+			}
+			continue
+		}
+		if err == nil && c.err != "" {
+			t.Errorf("case %d, error mismatched. expected %s. got %s", i, c.err, err)
+			continue
+		}
+		verifyManifest(t, c.expInfo.Manifest, gotInfo.Manifest)
 
-	verifyManifest(t, expSubInfoAtC.Manifest, SubinfoAtC.Manifest)
+		if len(gotInfo.Sizes) != len(c.expInfo.Sizes) {
+			t.Errorf("sizes length mismatch. expected: %d. got: %d", len(c.expInfo.Sizes), len(gotInfo.Sizes))
+			continue
+		}
 
-	if len(expSubInfoAtC.Sizes) != len(SubinfoAtC.Sizes) {
-		t.Errorf("sizes length mismatch. expected: %d. got: %d", len(expSubInfoAtC.Sizes), len(SubinfoAtC.Sizes))
-		return
-	}
-
-	for i, s := range expSubInfoAtC.Sizes {
-		if s != SubinfoAtC.Sizes[i] {
-			t.Errorf("sizes index %d mismatch. expected: %d, got: %d", i, s, SubinfoAtC.Sizes[i])
+		for i, s := range c.expInfo.Sizes {
+			if s != gotInfo.Sizes[i] {
+				t.Errorf("sizes index %d mismatch. expected: %d, got: %d", i, s, gotInfo.Sizes[i])
+			}
 		}
 	}
+
 }

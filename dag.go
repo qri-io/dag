@@ -99,13 +99,13 @@ func (m *Manifest) RootCID() cid.Cid {
 }
 
 // IDIndex returns the node index of the id
-func (m *Manifest) IDIndex(id string) (int, error) {
+func (m *Manifest) IDIndex(id string) int {
 	for i, node := range m.Nodes {
 		if node == id {
-			return i, nil
+			return i
 		}
 	}
-	return -1, ErrIDNotFound
+	return -1
 }
 
 // // SubDAGIndex lists all hashes that are a descendant of manifest node index
@@ -270,7 +270,7 @@ type Info struct {
 // AddLabel adds a label to the list of Info.Labels
 // it returns an error if the index is out of bounds
 func (i *Info) AddLabel(label string, index int) error {
-	if index < 0 || index > len(i.Manifest.Nodes)-1 {
+	if index < 0 || index >= len(i.Manifest.Nodes) {
 		return ErrIndexOutOfRange
 	}
 	if i.Labels == nil {
@@ -283,9 +283,9 @@ func (i *Info) AddLabel(label string, index int) error {
 // AddLabelByID adds a label to the list of Info.Labels
 // it returns an error if the id is not part of the DAG
 func (i *Info) AddLabelByID(label, id string) error {
-	index, err := i.Manifest.IDIndex(id)
-	if err != nil {
-		return err
+	index := i.Manifest.IDIndex(id)
+	if index == -1 {
+		return ErrIDNotFound
 	}
 	return i.AddLabel(label, index)
 }

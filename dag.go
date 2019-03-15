@@ -14,6 +14,7 @@ package dag
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"sort"
 
 	"github.com/ugorji/go/codec"
@@ -32,6 +33,14 @@ type Node interface {
 	// Size returns the size in bytes of the serialized object
 	Size() (uint64, error)
 }
+
+var (
+	// ErrIndexOutOfRange indicates the index given is out of range of the Manifest
+	ErrIndexOutOfRange = fmt.Errorf("index out of range")
+
+	// ErrIDNotFound indicates the id given is not found in the Manifest
+	ErrIDNotFound = fmt.Errorf("id not found in Manifest")
+)
 
 // NewManifest generates a manifest from an ipld node
 func NewManifest(ctx context.Context, ng ipld.NodeGetter, id cid.Cid) (*Manifest, error) {
@@ -89,18 +98,15 @@ func (m *Manifest) RootCID() cid.Cid {
 	return id
 }
 
-// TODO (b5): finish
-// // SubDAG lists all hashes that are a descendant of the root id
-// func (m *Manifest) SubDAG(id string) []string {
-// 	nodes := []string{id}
-// 	for i, h := range m.Nodes {
-// 		if id == h {
-// 			m.SubDAGIndex(i, &nodes)
-// 			return nodes
-// 		}
-// 	}
-// 	return nodes
-// }
+// IDIndex returns the node index of the id
+func (m *Manifest) IDIndex(id string) int {
+	for i, node := range m.Nodes {
+		if node == id {
+			return i
+		}
+	}
+	return -1
+}
 
 // // SubDAGIndex lists all hashes that are a descendant of manifest node index
 // func (m *Manifest) SubDAGIndex(idx int, nodes *[]string) {
@@ -257,8 +263,31 @@ func NewInfo(ctx context.Context, ng ipld.NodeGetter, id cid.Cid) (*Info, error)
 type Info struct {
 	// Info is built upon a manifest
 	Manifest *Manifest      `json:"manifest"`
-	Paths    map[string]int `json:"paths,omitempty"` // sections are lists of logical sub-DAGs by positions in the nodes list
-	Sizes    []uint64       `json:"sizes,omitempty"` // sizes of nodes in bytes
+	Labels   map[string]int `json:"labels,omitempty"` // sections are lists of logical sub-DAGs by positions in the nodes list
+	Sizes    []uint64       `json:"sizes,omitempty"`  // sizes of nodes in bytes
+}
+
+// AddLabel adds a label to the list of Info.Labels
+// it returns an error if the index is out of bounds
+func (i *Info) AddLabel(label string, index int) error {
+	if index < 0 || index >= len(i.Manifest.Nodes) {
+		return ErrIndexOutOfRange
+	}
+	if i.Labels == nil {
+		i.Labels = map[string]int{}
+	}
+	i.Labels[label] = index
+	return nil
+}
+
+// AddLabelByID adds a label to the list of Info.Labels
+// it returns an error if the id is not part of the DAG
+func (i *Info) AddLabelByID(label, id string) error {
+	index := i.Manifest.IDIndex(id)
+	if index == -1 {
+		return ErrIDNotFound
+	}
+	return i.AddLabel(label, index)
 }
 
 // RootCID proxies the manifest RootCID method, protecting against situations where

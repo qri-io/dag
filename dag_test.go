@@ -88,6 +88,47 @@ func TestNewManifest(t *testing.T) {
 	verifyManifest(t, exp, mf)
 }
 
+func TestIDIndex(t *testing.T) {
+	content = 0
+
+	a := newNode(10) // zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8
+	b := newNode(20) // zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz
+	c := newNode(30) // zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ
+	d := newNode(40) // zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP
+	e := newNode(50) // zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV
+	f := newNode(60) // zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6
+	a.links = []*node{b, c}
+	c.links = []*node{d, e}
+	d.links = []*node{f}
+
+	ctx := context.Background()
+	ng := TestingNodeGetter{[]ipld.Node{a, b, c, d, e, f}}
+	mf, err := NewManifest(ctx, ng, a.Cid())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		id       string
+		expIndex int
+	}{
+		{"bad id", -1},
+		{"zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8", 0},
+		{"zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ", 1},
+		{"zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP", 2},
+		{"zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV", 3},
+		{"zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz", 4},
+		{"zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", 5},
+	}
+
+	for i, c := range cases {
+		gotIndex := mf.IDIndex(c.id)
+		if gotIndex != c.expIndex {
+			t.Errorf("case %d index mismatch, expected %d, got %d", i, c.expIndex, gotIndex)
+		}
+	}
+}
+
 func TestNewInfo(t *testing.T) {
 	content = 0
 
@@ -135,6 +176,105 @@ func TestNewInfo(t *testing.T) {
 	for i, s := range exp.Sizes {
 		if s != di.Sizes[i] {
 			t.Errorf("sizes index %d mismatch. expected: %d, got: %d", i, s, di.Sizes[i])
+		}
+	}
+}
+
+func TestAddLabel(t *testing.T) {
+	content = 0
+
+	a := newNode(10) // zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8
+	b := newNode(20) // zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz
+	c := newNode(30) // zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ
+	d := newNode(40) // zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP
+	e := newNode(50) // zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV
+	f := newNode(60) // zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6
+	a.links = []*node{b, c}
+	c.links = []*node{d, e}
+	d.links = []*node{f}
+
+	ctx := context.Background()
+	ng := TestingNodeGetter{[]ipld.Node{a, b, c, d, e, f}}
+	di, err := NewInfo(ctx, ng, a.Cid())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		label string
+		index int
+		err   error
+	}{
+		{"bad index", -1, ErrIndexOutOfRange},
+		{"bad index", 6, ErrIndexOutOfRange},
+		{"root", 0, nil},
+		{"leaf", 5, nil},
+	}
+
+	for i, c := range cases {
+		err := di.AddLabel(c.label, c.index)
+		if err != nil {
+			if err != c.err || err == nil && c.err != nil {
+				t.Errorf("case %d error mismatch, expected '%s', got '%s'", i, c.err, err)
+			}
+			continue
+		}
+		gotIndex, ok := di.Labels[c.label]
+		if !ok {
+			t.Errorf("case %d, label '%s' missing from list of Labels", i, c.label)
+			continue
+		}
+		if gotIndex != c.index {
+			t.Errorf("case %d, label/index mismatch, for label '%s', expected %d, got %d", i, c.label, c.index, gotIndex)
+		}
+	}
+}
+
+func TestAddLabelByID(t *testing.T) {
+	content = 0
+
+	a := newNode(10) // zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8
+	b := newNode(20) // zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz
+	c := newNode(30) // zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ
+	d := newNode(40) // zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP
+	e := newNode(50) // zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV
+	f := newNode(60) // zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6
+	a.links = []*node{b, c}
+	c.links = []*node{d, e}
+	d.links = []*node{f}
+
+	ctx := context.Background()
+	ng := TestingNodeGetter{[]ipld.Node{a, b, c, d, e, f}}
+	di, err := NewInfo(ctx, ng, a.Cid())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		label, id string
+		err       error
+	}{
+		{"bad id", "BAD ID", ErrIDNotFound},
+		{"root", "zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8", nil},
+		{"leaf", "zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", nil},
+	}
+
+	for i, c := range cases {
+		err := di.AddLabelByID(c.label, c.id)
+		if err != nil {
+			if err != c.err || err == nil && c.err != nil {
+				t.Errorf("case %d error mismatch, expected '%s', got '%s'", i, c.err, err)
+			}
+			continue
+		}
+		gotIndex, ok := di.Labels[c.label]
+		if !ok {
+			t.Errorf("case %d, label '%s' missing from list of Labels", i, c.label)
+			continue
+		}
+		gotID := di.Manifest.Nodes[gotIndex]
+		if gotID != c.id {
+			t.Errorf("case %d, label/id mismatch, for label '%s', expected %s, got %s", i, c.label, c.id, gotID)
 		}
 	}
 }

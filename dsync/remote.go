@@ -43,7 +43,7 @@ type Remote interface {
 	GetBlock(ctx context.Context, hash string) (rawdata []byte, err error)
 }
 
-// Response defines the result of sending a block, or attempting to send a block
+// Response defines the result of sending a block, or attempting to send a block.
 // TODO (b5): rename to SendResponse
 type Response struct {
 	Hash   string
@@ -51,12 +51,12 @@ type Response struct {
 	Err    error
 }
 
-// HTTPRemote implents the Remote interface via HTTP requests
+// HTTPRemote implents the Remote interface via HTTP requests.
 type HTTPRemote struct {
 	URL string
 }
 
-// ReqSend initiates a send session
+// ReqSend initiates a send session. It sends a Manifest to a remote source over HTTP
 func (rem *HTTPRemote) ReqSend(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
 	buf := &bytes.Buffer{}
 	if err = json.NewEncoder(buf).Encode(mfst); err != nil {
@@ -79,7 +79,7 @@ func (rem *HTTPRemote) ReqSend(mfst *dag.Manifest) (sid string, diff *dag.Manife
 		if data, err := ioutil.ReadAll(res.Body); err == nil {
 			msg = string(data)
 		}
-		err = fmt.Errorf("remote repsonse: %d %s", res.StatusCode, msg)
+		err = fmt.Errorf("remote response: %d %s", res.StatusCode, msg)
 		return
 	}
 
@@ -125,14 +125,13 @@ func (rem *HTTPRemote) PutBlock(sid, hash string, data []byte) Response {
 			Err:    fmt.Errorf("remote error: %d %s", res.StatusCode, msg),
 		}
 	}
-
 	return Response{
 		Hash:   hash,
 		Status: StatusOk,
 	}
 }
 
-// ReqManifest gets a
+// ReqManifest gets a manifest from a remote source over HTTP
 func (rem *HTTPRemote) ReqManifest(ctx context.Context, id string) (mfst *dag.Manifest, err error) {
 	url := fmt.Sprintf("%s?manifest=%s", rem.URL, id)
 	req, err := http.NewRequest("GET", url, nil)
@@ -159,7 +158,7 @@ func (rem *HTTPRemote) ReqManifest(ctx context.Context, id string) (mfst *dag.Ma
 	return
 }
 
-// GetBlock fetches a block from HTTPRemote
+// GetBlock fetches a block from a remote source over HTTP
 func (rem *HTTPRemote) GetBlock(ctx context.Context, id string) (data []byte, err error) {
 	url := fmt.Sprintf("%s?block=%s", rem.URL, id)
 	req, err := http.NewRequest("GET", url, nil)
@@ -184,7 +183,7 @@ func (rem *HTTPRemote) GetBlock(ctx context.Context, id string) (data []byte, er
 	return ioutil.ReadAll(res.Body)
 }
 
-// Receive tracks state of receiving a manifest of blocks from a remote
+// Receive tracks the state of receiving an individual manifest of blocks from a remote.
 // TODO (b5): This is session state, and should be renamed to reflect that. ReceiveSession? PushState?
 type Receive struct {
 	sid    string

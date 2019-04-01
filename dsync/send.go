@@ -75,7 +75,18 @@ func (snd *Send) Do() (err error) {
 	if err != nil {
 		return err
 	}
+	return snd.doActualSend()
+}
 
+// PerformSend executes the send, given that we already have a session and diff
+func (snd *Send) PerformSend(sid string, mfst, diff *dag.Manifest) error {
+	snd.sid = sid
+	snd.mfst = mfst
+	snd.diff = diff
+	return snd.doActualSend()
+}
+
+func (snd *Send) doActualSend() (err error) {
 	snd.prog = dag.NewCompletion(snd.mfst, snd.diff)
 	go snd.completionChanged()
 	// defer close(snd.progCh)

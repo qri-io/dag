@@ -13,6 +13,11 @@ type NodeGetter struct {
 	Dag coreiface.DagAPI
 }
 
+// NewNodeGetter returns a new NodeGetter from an IPFS core API
+func NewNodeGetter(capi coreiface.CoreAPI) *NodeGetter {
+	return &NodeGetter{Dag: capi.Dag()}
+}
+
 // Get retrieves nodes by CID. Depending on the NodeGetter
 // implementation, this may involve fetching the Node from a remote
 // machine; consider setting a deadline in the context.

@@ -10,10 +10,10 @@ import (
 
 	"github.com/qri-io/dag"
 
-	"gx/ipfs/QmPSQnBKM9g7BaUcZCvswUJVscQ1ipjmwxN5PXCjkp9EQ7/go-cid"
-	ipld "gx/ipfs/QmR7TcHkR9nxkUorfi8XMTAMLUK7GiP64TWWBzY3aacc1o/go-ipld-format"
-	coreiface "gx/ipfs/QmUJYo4etAQqFfSS2rarFAE97eNGB8ej64YkRT2SmsYD4r/go-ipfs/core/coreapi/interface"
-	files "gx/ipfs/QmZMWMvWMVKCbHetJ4RgndbuEF1io2UpUxwQwtNjtYPzSC/go-ipfs-files"
+	"github.com/ipfs/go-cid"
+	files "github.com/ipfs/go-ipfs-files"
+	coreiface "github.com/ipfs/go-ipfs/core/coreapi/interface"
+	ipld "github.com/ipfs/go-ipld-format"
 )
 
 func TestSyncHTTP(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
-	coreiface "github.com/ipfs/go-ipfs/core/coreapi/interface"
+	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	ipld "github.com/ipfs/go-ipld-format"
 )
 
@@ -28,7 +28,7 @@ func TestSyncHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f := files.NewReaderFile("oh_hey", "oh_hey", ioutil.NopCloser(strings.NewReader("y"+strings.Repeat("o", 35000))), nil)
+	f := files.NewReaderFile(ioutil.NopCloser(strings.NewReader("y"+strings.Repeat("o", 350))))
 	path, err := a.Unixfs().Add(ctx, f)
 	if err != nil {
 		t.Fatal(err)

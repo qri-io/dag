@@ -9,8 +9,9 @@ import (
 	syncds "github.com/ipfs/go-datastore/sync"
 	config "github.com/ipfs/go-ipfs-config"
 	core "github.com/ipfs/go-ipfs/core"
+	corebs "github.com/ipfs/go-ipfs/core/bootstrap"
 	coreapi "github.com/ipfs/go-ipfs/core/coreapi"
-	coreiface "github.com/ipfs/go-ipfs/core/coreapi/interface"
+	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	mock "github.com/ipfs/go-ipfs/core/mock"
 	"github.com/ipfs/go-ipfs/keystore"
 	"github.com/ipfs/go-ipfs/repo"
@@ -85,7 +86,10 @@ func makeAPISwarm(ctx context.Context, fullIdentity bool, n int) ([]*core.IpfsNo
 			return nil, nil, err
 		}
 		nodes[i] = node
-		apis[i] = coreapi.NewCoreAPI(node)
+		apis[i], err = coreapi.NewCoreAPI(node)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	err := mn.LinkAll()
@@ -93,7 +97,7 @@ func makeAPISwarm(ctx context.Context, fullIdentity bool, n int) ([]*core.IpfsNo
 		return nil, nil, err
 	}
 
-	bsinf := core.BootstrapConfigWithPeers(
+	bsinf := corebs.BootstrapConfigWithPeers(
 		[]pstore.PeerInfo{
 			nodes[0].Peerstore.PeerInfo(nodes[0].Identity),
 		},

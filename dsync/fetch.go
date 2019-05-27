@@ -7,8 +7,8 @@ import (
 
 	"github.com/qri-io/dag"
 
-	coreiface "github.com/ipfs/go-ipfs/core/coreapi/interface"
 	ipld "github.com/ipfs/go-ipld-format"
+	coreiface "github.com/ipfs/interface-go-ipfs-core"
 )
 
 // NewFetch initiates a fetch for a DAG at an id from a remote

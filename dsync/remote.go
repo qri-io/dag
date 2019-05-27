@@ -10,10 +10,9 @@ import (
 	"math/rand"
 	"net/http"
 
-	"github.com/qri-io/dag"
-
-	coreiface "github.com/ipfs/go-ipfs/core/coreapi/interface"
 	ipld "github.com/ipfs/go-ipld-format"
+	coreiface "github.com/ipfs/interface-go-ipfs-core"
+	"github.com/qri-io/dag"
 )
 
 // ResponseStatus defines types of results for a request

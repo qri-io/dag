@@ -19,7 +19,7 @@ func TestSend(t *testing.T) {
 	}
 
 	bGetter := &dag.NodeGetter{Dag: b.Dag()}
-	receive, err := NewReceive(ctx, bGetter, b.Block(), mfst)
+	receive, err := NewTransfer(ctx, bGetter, b.Block(), mfst)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestSend(t *testing.T) {
 		bapi:    b.Block(),
 	}
 
-	send, err := NewSend(ctx, aGetter, mfst, rem)
+	send, err := NewPush(ctx, aGetter, mfst, rem)
 	if err != nil {
 		t.Fatal(err)
 	}

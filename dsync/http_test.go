@@ -41,18 +41,18 @@ func TestSyncHTTP(t *testing.T) {
 	}
 
 	bGetter := &dag.NodeGetter{Dag: b.Dag()}
-	rs := NewReceivers(ctx, bGetter, b.Block())
-	s := httptest.NewServer(rs.HTTPHandler())
+	ts := NewTransfers(ctx, bGetter, b.Block())
+	s := httptest.NewServer(HTTPTransfersHandler(ts))
 	defer s.Close()
 
-	rem := &HTTPRemote{URL: s.URL}
+	cli := &HTTPClient{URL: s.URL}
 
-	send, err := NewSend(ctx, aGetter, mfst, rem)
+	push, err := NewPush(ctx, aGetter, mfst, cli)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := send.Do(); err != nil {
+	if err := push.Do(); err != nil {
 		t.Error(err)
 	}
 
@@ -65,14 +65,14 @@ func TestSyncHTTP(t *testing.T) {
 
 // remote implements the Remote interface on a single receive session at a time
 type remote struct {
-	receive *Receive
+	receive *Transfer
 	lng     ipld.NodeGetter
 	bapi    coreiface.BlockAPI
 }
 
-func (r *remote) ReqSend(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
+func (r *remote) PushStart(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
 	ctx := context.Background()
-	r.receive, err = NewReceive(ctx, r.lng, r.bapi, mfst)
+	r.receive, err = NewTransfer(ctx, r.lng, r.bapi, mfst)
 	if err != nil {
 		return
 	}
@@ -81,11 +81,11 @@ func (r *remote) ReqSend(mfst *dag.Manifest) (sid string, diff *dag.Manifest, er
 	return
 }
 
-func (r *remote) PutBlock(sid, hash string, data []byte) Response {
+func (r *remote) PushBlock(sid, hash string, data []byte) Response {
 	return r.receive.ReceiveBlock(hash, bytes.NewReader(data))
 }
 
-func (r *remote) ReqManifest(ctx context.Context, hash string) (mfst *dag.Manifest, err error) {
+func (r *remote) PullManifest(ctx context.Context, hash string) (mfst *dag.Manifest, err error) {
 	id, err := cid.Parse(hash)
 	if err != nil {
 		return nil, err
@@ -94,7 +94,7 @@ func (r *remote) ReqManifest(ctx context.Context, hash string) (mfst *dag.Manife
 	return dag.NewManifest(ctx, r.lng, id)
 }
 
-func (r *remote) GetBlock(ctx context.Context, hash string) ([]byte, error) {
+func (r *remote) PullBlock(ctx context.Context, hash string) ([]byte, error) {
 	id, err := cid.Parse(hash)
 	if err != nil {
 		return nil, err

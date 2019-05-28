@@ -48,26 +48,35 @@
 // `HTTPRemote` structures requests correctly to work with the remote's Receiver http api. And `HTTPHandler` exposes that http api, so it can handle requests from the local.
 package dsync
 
+import (
+	"context"
+
+	"github.com/qri-io/dag"
+)
+
 const (
 	// default to parallelism of 3. So far 4 was enough to blow up a std k8s pod running IPFS :(
-	defaultSendParallelism = 3
+	defaultPushParallelism = 3
 	// default to parallelism of 3
 	// TODO (b5): tune this figure
-	defaultFetchParallelism = 3
+	defaultPullParallelism = 3
 	// total number of retries to attempt before send is considered faulty
 	// TODO (b5): this number should be retries *per object*, and a much lower
 	// number, like 5.
 	maxRetries = 25
 )
 
-// TODO (b5): WIP. lots of things could just become methods on a "local":
-// local.NewSendReq(remote).Do()
-// local.NewFetchReq(remote).Do()
-// local could optionally add a receiver to act as a remote for inboud sync requests
-//
-// Local encapsulates sync operations from the end of the wire a process owns
-// type Local struct {
-// 	ctx context.Context
-// 	lng ipld.NodeGetter
-// 	bapi coreiface.BlockAPI
-// }
+// Remote is a source that can be synced to & from
+type Remote interface {
+	// PushStart requests a new send session from the remote, which will return a
+	// delta manifest of blocks the remote needs and a session id that must
+	// be sent with each block
+	PushStart(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error)
+	// PushBlock places a block on the remote
+	PushBlock(sid, hash string, data []byte) Response
+
+	// PullManifest asks the remote for a manifest specified by the root ID of a DAG
+	PullManifest(ctx context.Context, path string) (mfst *dag.Manifest, err error)
+	// PullBlock gets a block from the remote
+	PullBlock(ctx context.Context, hash string) (rawdata []byte, err error)
+}

@@ -12,13 +12,13 @@ import (
 	"github.com/ipfs/interface-go-ipfs-core/path"
 )
 
-// NewTestReceivers returns a Receivers pointer suitable for testing, and not much else
-func NewTestReceivers() *Receivers {
-	return &Receivers{
+// NewTestTransfers returns a Transfers pointer suitable for testing
+func NewTestTransfers() *Transfers {
+	return &Transfers{
 		ctx:     context.Background(),
 		lng:     newTestNodeGetter(),
 		bapi:    newTestBlockAPI(),
-		pool:    make(map[string]*Receive),
+		pool:    make(map[string]*Transfer),
 		cancels: make(map[string]context.CancelFunc),
 		TTLDur:  time.Hour * 5,
 	}

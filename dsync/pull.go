@@ -11,26 +11,26 @@ import (
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 )
 
-// NewFetch initiates a fetch for a DAG at an id from a remote
-func NewFetch(ctx context.Context, id string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (fetch *Fetch, err error) {
-	f := &Fetch{
+// NewPull sets up fetching a DAG at an id from a remote
+func NewPull(ctx context.Context, id string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (pull *Pull, err error) {
+	f := &Pull{
 		ctx:         ctx,
 		path:        id,
 		lng:         lng,
 		bapi:        bapi,
 		remote:      rem,
-		parallelism: defaultFetchParallelism,
+		parallelism: defaultPullParallelism,
 		progCh:      make(chan dag.Completion),
 		reqCh:       make(chan string),
-		resCh:       make(chan FetchRes),
+		resCh:       make(chan PullRes),
 	}
 
 	return f, nil
 }
 
-// NewFetchWithManifest creates a fetch when we already have a manifest
-func NewFetchWithManifest(ctx context.Context, mfst *dag.Manifest, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (fetch *Fetch, err error) {
-	f, err := NewFetch(ctx, mfst.RootCID().String(), lng, bapi, rem)
+// NewPullWithManifest creates a pull when we already have a manifest
+func NewPullWithManifest(ctx context.Context, mfst *dag.Manifest, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (pull *Pull, err error) {
+	f, err := NewPull(ctx, mfst.RootCID().String(), lng, bapi, rem)
 	if err != nil {
 		return nil, err
 	}
@@ -38,8 +38,8 @@ func NewFetchWithManifest(ctx context.Context, mfst *dag.Manifest, lng ipld.Node
 	return f, nil
 }
 
-// Fetch coordinates the transfer of missing blocks in a DAG from a remote to a block store
-type Fetch struct {
+// Pull coordinates the transfer of missing blocks in a DAG from a remote to a block store
+type Pull struct {
 	path        string
 	mfst        *dag.Manifest
 	diff        *dag.Manifest
@@ -51,50 +51,50 @@ type Fetch struct {
 	prog        dag.Completion
 	progCh      chan dag.Completion
 	reqCh       chan string
-	resCh       chan FetchRes
+	resCh       chan PullRes
 }
 
-// FetchRes is a response from a fetch request
-type FetchRes struct {
+// PullRes is a response from a pull request
+type PullRes struct {
 	Hash  string
 	Raw   []byte
 	Error error
 }
 
-// Do executes the fetch, blocking until complete
-func (f *Fetch) Do() (err error) {
+// Do executes the pull, blocking until complete
+func (f *Pull) Do() (err error) {
 	// First Do requests a manifest from the remote node
 	// It determines the progress already made
-	// It begins to fetch the blocks in parallel:
-	// 		- we create a number of fetchers
-	//    - these fetchers listen for incoming ids on the request channel
+	// It begins to pull the blocks in parallel:
+	// 		- we create a number of pullers
+	//    - these pullers listen for incoming ids on the request channel
 	//      they request the blocks of these hash from the remote & send the responses
 	//      to the response channel
 	//    - we create an error channel, sending anything on this channel triggers an end
 	//      to the while process
 	//    - we then create loop that listens on the response channel for
-	//      fetch responses:
+	//      pull responses:
 	//      - if there is a valid response, we put the incoming block into our local store
 	//      - if there is an error response, we send the error over the error channel
-	//      - if we have finished fetching all the blocks, we send nil over the error channel
+	//      - if we have finished pulling all the blocks, we send nil over the error channel
 	//      - if at anytime we get a timeout aka an alert from context.Done(), we
 	//        also send over the error response
 	//    - we set up a loop that actually fills the request
-	//      channel with ids we want the fetcher to fetch
-	//    - These ids are read by the fetchers in parallel, they send the requests the
+	//      channel with ids we want the puller to pull
+	//    - These ids are read by the pullers in parallel, they send the requests the
 	//      to the remote
 	//
 	// so three main things:
-	//   1) set up the process for fetching the blocks from the remote
+	//   1) set up the process for pulling the blocks from the remote
 	//   2) set up the process for handling the responses from the remote
 	//   		(putting the blocks into the local store, erroring, triggering
-	//       a completion when all blocks have been fetched, or triggering a
+	//       a completion when all blocks have been pulled, or triggering a
 	//       timeout)
-	//   3) set up the process for telling the fetchers which blocks to
+	//   3) set up the process for telling the pullers which blocks to
 	//      request
 	if f.mfst == nil {
 		// request a manifest from the remote if we don't have one
-		if f.mfst, err = f.remote.ReqManifest(f.ctx, f.path); err != nil {
+		if f.mfst, err = f.remote.PullManifest(f.ctx, f.path); err != nil {
 			return
 		}
 	}
@@ -121,16 +121,16 @@ func (f *Fetch) Do() (err error) {
 
 	// TODO (b5): this is really terrible to print here, but is *very* helpful info on the CLI
 	// we should pipe a completion channel up to the CLI & remove this
-	fmt.Printf("   fetching %d blocks\n", len(f.diff.Nodes))
+	fmt.Printf("   pulling %d blocks\n", len(f.diff.Nodes))
 
 	if len(f.diff.Nodes) < f.parallelism {
 		f.parallelism = len(f.diff.Nodes)
 	}
 
-	// create fetchers
-	fetchers := make([]fetcher, f.parallelism)
+	// create pullers
+	pullers := make([]puller, f.parallelism)
 	for i := 0; i < f.parallelism; i++ {
-		fetchers[i] = fetcher{
+		pullers[i] = puller{
 			id:     i,
 			ctx:    f.ctx,
 			remote: f.remote,
@@ -138,10 +138,10 @@ func (f *Fetch) Do() (err error) {
 			resCh:  f.resCh,
 			stopCh: make(chan bool),
 		}
-		go fetchers[i].start()
+		go pullers[i].start()
 	}
 	defer func() {
-		for _, fr := range fetchers {
+		for _, fr := range pullers {
 			fr.stop()
 		}
 	}()
@@ -151,7 +151,7 @@ func (f *Fetch) Do() (err error) {
 		for {
 			select {
 			case res := <-f.resCh:
-				go func(res FetchRes) {
+				go func(res PullRes) {
 					if res.Error != nil {
 						errCh <- res.Error
 						return
@@ -194,31 +194,31 @@ func (f *Fetch) Do() (err error) {
 	return <-errCh
 }
 
-func (f *Fetch) completionChanged() {
+func (f *Pull) completionChanged() {
 	f.progCh <- f.prog
 }
 
-// fetcher is a parallelizable, stateless struct that fetches blocks
-type fetcher struct {
+// puller is a parallelizable, stateless struct that pulles blocks
+type puller struct {
 	id     int
 	remote Remote
 	ctx    context.Context
 	reqCh  <-chan string
-	resCh  chan FetchRes
+	resCh  chan PullRes
 	stopCh chan bool
 }
 
-// start has the fetcher listen for ids coming into the request channel
+// start has the puller listen for ids coming into the request channel
 // it then get's a block from the remote, and passes the response to the
 // response channel
 // If we get a call on the stop channel, we end the process.
-func (f fetcher) start() {
+func (f puller) start() {
 	for {
 		select {
 		case hash := <-f.reqCh:
 			go func() {
-				data, err := f.remote.GetBlock(f.ctx, hash)
-				f.resCh <- FetchRes{
+				data, err := f.remote.PullBlock(f.ctx, hash)
+				f.resCh <- PullRes{
 					Hash:  hash,
 					Raw:   data,
 					Error: err,
@@ -230,6 +230,6 @@ func (f fetcher) start() {
 	}
 }
 
-func (f fetcher) stop() {
+func (f puller) stop() {
 	f.stopCh <- true
 }

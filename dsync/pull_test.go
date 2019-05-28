@@ -7,7 +7,7 @@ import (
 	"github.com/qri-io/dag"
 )
 
-func TestFetch(t *testing.T) {
+func TestPull(t *testing.T) {
 	ctx := context.Background()
 	a, b := newLocalRemoteIPFSAPI(ctx, t)
 	id := addOneBlockDAG(b, t)
@@ -19,12 +19,12 @@ func TestFetch(t *testing.T) {
 		bapi: b.Block(),
 	}
 
-	f, err := NewFetch(ctx, id.String(), aGetter, a.Block(), rem)
+	p, err := NewPull(ctx, id.String(), aGetter, a.Block(), rem)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := f.Do(); err != nil {
+	if err := p.Do(); err != nil {
 		t.Fatal(err)
 	}
 

@@ -18,13 +18,13 @@ type HTTPClient struct {
 
 // NewReceiveSession initiates a session for pushing blocks to a remote.
 // It sends a Manifest to a remote source over HTTP
-func (rem *HTTPClient) NewReceiveSession(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
+func (rem *HTTPClient) NewReceiveSession(mfst *dag.Manifest, pinOnComplete bool) (sid string, diff *dag.Manifest, err error) {
 	buf := &bytes.Buffer{}
 	if err = json.NewEncoder(buf).Encode(mfst); err != nil {
 		return
 	}
 
-	req, err := http.NewRequest("POST", rem.URL, buf)
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s?pin=%t", rem.URL, pinOnComplete), buf)
 	if err != nil {
 		return
 	}
@@ -157,7 +157,9 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 			}
 			r.Body.Close()
 
-			sid, diff, err := ds.NewReceiveSession(mfst)
+			pinOnComplete := r.FormValue("pin") == "true"
+
+			sid, diff, err := ds.NewReceiveSession(mfst, pinOnComplete)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte(err.Error()))

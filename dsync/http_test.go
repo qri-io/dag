@@ -47,7 +47,7 @@ func TestSyncHTTP(t *testing.T) {
 
 	cli := &HTTPClient{URL: s.URL}
 
-	push, err := NewPush(aGetter, mfst, cli)
+	push, err := NewPush(aGetter, mfst, cli, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ type remote struct {
 
 func (r *remote) PushStart(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
 	ctx := context.Background()
-	r.receive, err = NewSession(ctx, r.lng, r.bapi, mfst)
+	r.receive, err = NewSession(ctx, r.lng, r.bapi, mfst, false)
 	if err != nil {
 		return
 	}

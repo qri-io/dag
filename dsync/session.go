@@ -17,6 +17,7 @@ type Session struct {
 	ctx    context.Context
 	lng    ipld.NodeGetter
 	bapi   coreiface.BlockAPI
+	pin    bool
 	mfst   *dag.Manifest
 	diff   *dag.Manifest
 	prog   dag.Completion
@@ -24,7 +25,7 @@ type Session struct {
 }
 
 // NewSession creates a receive state machine
-func NewSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAPI, mfst *dag.Manifest) (*Session, error) {
+func NewSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAPI, mfst *dag.Manifest, pinOnComplete bool) (*Session, error) {
 	// TODO (b5): ipfs api/v0/get/block doesn't allow checking for local blocks yet
 	// aren't working over ipfs api, so we can't do delta's quite yet. Just send the whole things back
 	diff := mfst
@@ -41,6 +42,7 @@ func NewSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAP
 		bapi:   bapi,
 		mfst:   mfst,
 		diff:   diff,
+		pin:    pinOnComplete,
 		prog:   dag.NewCompletion(mfst, diff),
 		progCh: make(chan dag.Completion),
 	}

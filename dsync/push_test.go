@@ -21,7 +21,7 @@ func TestPush(t *testing.T) {
 	bGetter := &dag.NodeGetter{Dag: b.Dag()}
 	rem := New(bGetter, b.Block())
 
-	send, err := NewPush(aGetter, mfst, rem)
+	send, err := NewPush(aGetter, mfst, rem, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -81,7 +81,7 @@ type Remote interface {
 	// NewReceiveSession requests a new send session from the remote, which will return a
 	// delta manifest of blocks the remote needs and a session id that must
 	// be sent with each block
-	NewReceiveSession(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error)
+	NewReceiveSession(mfst *dag.Manifest, pinOnComplete bool) (sid string, diff *dag.Manifest, err error)
 	// ReceiveBlock places a block on the remote
 	ReceiveBlock(sid, hash string, data []byte) ReceiveResponse
 
@@ -100,12 +100,14 @@ type DagCheck func(context.Context, dag.Manifest) error
 // Dsync is a service for synchronizing a DAG of blocks between a local & remote
 // source
 type Dsync struct {
+	// cache of dagInfo/manifests
+	infoStore dag.InfoStore
 	// local node getter
 	lng ipld.NodeGetter
 	// local block API for placing blocks
 	bapi coreiface.BlockAPI
-	// cache of dagInfo/manifests
-	infoStore dag.InfoStore
+	// api for pinning blocks
+	pin coreiface.PinAPI
 
 	// if dagCheck isn't nil, it's called before creating a session.
 	dagCheck DagCheck
@@ -124,6 +126,7 @@ var _ Remote = (*Dsync)(nil)
 // Config encapsulates optional Dsync configuration
 type Config struct {
 	InfoStore         dag.InfoStore
+	PinAPI            coreiface.PinAPI
 	HTTPRemoteAddress string
 	DagCheck          DagCheck
 }
@@ -145,6 +148,9 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 		sessionTTLDur:  time.Hour * 5,
 	}
 
+	if cfg.PinAPI != nil {
+		ds.pin = cfg.PinAPI
+	}
 	if cfg.InfoStore != nil {
 		ds.infoStore = cfg.InfoStore
 	}
@@ -181,7 +187,7 @@ func (ds *Dsync) StartRemote(ctx context.Context) error {
 }
 
 // NewPush creates a push from Dsync to a remote address
-func (ds *Dsync) NewPush(cidStr, remoteAddr string) (*Push, error) {
+func (ds *Dsync) NewPush(cidStr, remoteAddr string, pinOnComplete bool) (*Push, error) {
 	id, err := cid.Parse(cidStr)
 	if err != nil {
 		return nil, err
@@ -191,14 +197,14 @@ func (ds *Dsync) NewPush(cidStr, remoteAddr string) (*Push, error) {
 		return nil, err
 	}
 
-	return ds.NewPushManifest(mfst, remoteAddr)
+	return ds.NewPushManifest(mfst, remoteAddr, pinOnComplete)
 }
 
 // NewPushManifest creates a push from an existing manifest. All blocks in the
 // manifest must be accessible from the local Dsync block repository
-func (ds *Dsync) NewPushManifest(mfst *dag.Manifest, remoteAddr string) (*Push, error) {
+func (ds *Dsync) NewPushManifest(mfst *dag.Manifest, remoteAddr string, pinOnComplete bool) (*Push, error) {
 	rem := &HTTPClient{URL: remoteAddr}
-	return NewPush(ds.lng, mfst, rem)
+	return NewPush(ds.lng, mfst, rem, pinOnComplete)
 }
 
 // NewPull creates a pull. A pull fetches an entire DAG from a remote, placing
@@ -211,7 +217,7 @@ func (ds *Dsync) NewPull(cidStr, remoteAddr string) (*Pull, error) {
 // NewReceiveSession takes a manifest sent by a remote and initiates a
 // transfer session. It returns a manifest/diff of the blocks the reciever needs
 // to have a complete DAG new sessions are created with a deadline for completion
-func (ds *Dsync) NewReceiveSession(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
+func (ds *Dsync) NewReceiveSession(mfst *dag.Manifest, pinOnComplete bool) (sid string, diff *dag.Manifest, err error) {
 	// TODO (b5) - figure out context passing
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(ds.sessionTTLDur))
 
@@ -221,7 +227,12 @@ func (ds *Dsync) NewReceiveSession(mfst *dag.Manifest) (sid string, diff *dag.Ma
 		}
 	}
 
-	sess, err := NewSession(ctx, ds.lng, ds.bapi, mfst)
+	if pinOnComplete && ds.pin == nil {
+		err = fmt.Errorf("remote doesn't support pinning")
+		return
+	}
+
+	sess, err := NewSession(ctx, ds.lng, ds.bapi, mfst, pinOnComplete)
 	if err != nil {
 		cancel()
 		return
@@ -262,7 +273,7 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 			di := &dag.Info{
 				Manifest: sess.mfst,
 			}
-			if err := ds.infoStore.PutDAGInfo(context.Background(), sess.mfst.Nodes[0], di); err != nil {
+			if err := ds.infoStore.PutDAGInfo(sess.ctx, sess.mfst.Nodes[0], di); err != nil {
 				return ReceiveResponse{
 					Hash:   hash,
 					Status: StatusErrored,
@@ -270,6 +281,17 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 				}
 			}
 		}
+
+		if sess.pin {
+			if err := ds.pin.Add(sess.ctx, path.New(sess.mfst.Nodes[0])); err != nil {
+				return ReceiveResponse{
+					Hash:   sess.mfst.Nodes[0],
+					Status: StatusErrored,
+					Err:    err,
+				}
+			}
+		}
+
 		defer func() {
 			ds.sessionLock.Lock()
 			ds.sessionCancels[sid]()

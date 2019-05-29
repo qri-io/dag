@@ -16,8 +16,9 @@ type HTTPClient struct {
 	URL string
 }
 
-// PushStart initiates a send session. It sends a Manifest to a remote source over HTTP
-func (rem *HTTPClient) PushStart(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
+// NewReceiveSession initiates a session for pushing blocks to a remote.
+// It sends a Manifest to a remote source over HTTP
+func (rem *HTTPClient) NewReceiveSession(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
 	buf := &bytes.Buffer{}
 	if err = json.NewEncoder(buf).Encode(mfst); err != nil {
 		return
@@ -52,12 +53,12 @@ func (rem *HTTPClient) PushStart(mfst *dag.Manifest) (sid string, diff *dag.Mani
 	return
 }
 
-// PushBlock sends a block over HTTP to a remote source
-func (rem *HTTPClient) PushBlock(sid, hash string, data []byte) Response {
+// ReceiveBlock sends a block over HTTP to a remote source
+func (rem *HTTPClient) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 	url := fmt.Sprintf("%s?sid=%s&hash=%s", rem.URL, sid, hash)
 	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(data))
 	if err != nil {
-		return Response{
+		return ReceiveResponse{
 			Hash:   hash,
 			Status: StatusErrored,
 			Err:    err,
@@ -67,7 +68,7 @@ func (rem *HTTPClient) PushBlock(sid, hash string, data []byte) Response {
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return Response{
+		return ReceiveResponse{
 			Hash:   hash,
 			Status: StatusErrored,
 			Err:    err,
@@ -79,20 +80,20 @@ func (rem *HTTPClient) PushBlock(sid, hash string, data []byte) Response {
 		if data, err := ioutil.ReadAll(res.Body); err == nil {
 			msg = string(data)
 		}
-		return Response{
+		return ReceiveResponse{
 			Hash:   hash,
 			Status: StatusErrored,
 			Err:    fmt.Errorf("remote error: %d %s", res.StatusCode, msg),
 		}
 	}
-	return Response{
+	return ReceiveResponse{
 		Hash:   hash,
 		Status: StatusOk,
 	}
 }
 
-// PullManifest gets a manifest from a remote source over HTTP
-func (rem *HTTPClient) PullManifest(ctx context.Context, id string) (mfst *dag.Manifest, err error) {
+// GetManifest gets a manifest from a remote source over HTTP
+func (rem *HTTPClient) GetManifest(ctx context.Context, id string) (mfst *dag.Manifest, err error) {
 	url := fmt.Sprintf("%s?manifest=%s", rem.URL, id)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -118,8 +119,8 @@ func (rem *HTTPClient) PullManifest(ctx context.Context, id string) (mfst *dag.M
 	return
 }
 
-// PullBlock fetches a block from a remote source over HTTP
-func (rem *HTTPClient) PullBlock(ctx context.Context, id string) (data []byte, err error) {
+// GetBlock fetches a block from a remote source over HTTP
+func (rem *HTTPClient) GetBlock(ctx context.Context, id string) (data []byte, err error) {
 	url := fmt.Sprintf("%s?block=%s", rem.URL, id)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -143,8 +144,8 @@ func (rem *HTTPClient) PullBlock(ctx context.Context, id string) (data []byte, e
 	return ioutil.ReadAll(res.Body)
 }
 
-// HTTPTransfersHandler exposes Transfers over HTTP, interlocks with methods exposed by HTTPClient
-func HTTPTransfersHandler(rs *Transfers) http.HandlerFunc {
+// HTTPRemoteHandler exposes a Dsync remote over HTTP, interlocks with methods exposed by HTTPClient
+func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "POST":
@@ -156,7 +157,7 @@ func HTTPTransfersHandler(rs *Transfers) http.HandlerFunc {
 			}
 			r.Body.Close()
 
-			sid, diff, err := rs.PushStart(mfst)
+			sid, diff, err := ds.NewReceiveSession(mfst)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte(err.Error()))
@@ -175,7 +176,7 @@ func HTTPTransfersHandler(rs *Transfers) http.HandlerFunc {
 				return
 			}
 
-			res := rs.PushBlock(r.FormValue("sid"), r.FormValue("hash"), data)
+			res := ds.ReceiveBlock(r.FormValue("sid"), r.FormValue("hash"), data)
 
 			if res.Status == StatusErrored {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -193,7 +194,7 @@ func HTTPTransfersHandler(rs *Transfers) http.HandlerFunc {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte("either manifest or block query params are required"))
 			} else if mfstID != "" {
-				mfst, err := rs.PullManifest(r.Context(), mfstID)
+				mfst, err := ds.GetManifest(r.Context(), mfstID)
 				if err != nil {
 					w.WriteHeader(http.StatusInternalServerError)
 					w.Write([]byte(err.Error()))
@@ -210,7 +211,7 @@ func HTTPTransfersHandler(rs *Transfers) http.HandlerFunc {
 				w.Header().Set("Content-Type", "application/json")
 				w.Write(data)
 			} else {
-				data, err := rs.PullBlock(r.Context(), blockID)
+				data, err := ds.GetBlock(r.Context(), blockID)
 				if err != nil {
 					w.WriteHeader(http.StatusInternalServerError)
 					w.Write([]byte(err.Error()))

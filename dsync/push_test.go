@@ -7,7 +7,7 @@ import (
 	"github.com/qri-io/dag"
 )
 
-func TestSend(t *testing.T) {
+func TestPush(t *testing.T) {
 	ctx := context.Background()
 	a, b := newLocalRemoteIPFSAPI(ctx, t)
 	id := addOneBlockDAG(a, t)
@@ -19,23 +19,14 @@ func TestSend(t *testing.T) {
 	}
 
 	bGetter := &dag.NodeGetter{Dag: b.Dag()}
-	receive, err := NewTransfer(ctx, bGetter, b.Block(), mfst)
+	rem := New(bGetter, b.Block())
+
+	send, err := NewPush(aGetter, mfst, rem)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	rem := &remote{
-		receive: receive,
-		lng:     bGetter,
-		bapi:    b.Block(),
-	}
-
-	send, err := NewPush(ctx, aGetter, mfst, rem)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := send.Do(); err != nil {
+	if err := send.Do(ctx); err != nil {
 		t.Error(err)
 	}
 

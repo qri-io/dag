@@ -12,15 +12,14 @@ import (
 	"github.com/ipfs/interface-go-ipfs-core/path"
 )
 
-// NewTestTransfers returns a Transfers pointer suitable for testing
-func NewTestTransfers() *Transfers {
-	return &Transfers{
-		ctx:     context.Background(),
-		lng:     newTestNodeGetter(),
-		bapi:    newTestBlockAPI(),
-		pool:    make(map[string]*Transfer),
-		cancels: make(map[string]context.CancelFunc),
-		TTLDur:  time.Hour * 5,
+// NewTestDsync returns a Dsync pointer suitable for testing
+func NewTestDsync() *Dsync {
+	return &Dsync{
+		lng:            newTestNodeGetter(),
+		bapi:           newTestBlockAPI(),
+		sessionPool:    make(map[string]*Session),
+		sessionCancels: make(map[string]context.CancelFunc),
+		sessionTTLDur:  time.Hour * 5,
 	}
 }
 

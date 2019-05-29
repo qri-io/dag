@@ -12,25 +12,24 @@ import (
 )
 
 // NewPull sets up fetching a DAG at an id from a remote
-func NewPull(ctx context.Context, id string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (pull *Pull, err error) {
+func NewPull(cidStr string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (pull *Pull, err error) {
 	f := &Pull{
-		ctx:         ctx,
-		path:        id,
+		path:        cidStr,
 		lng:         lng,
 		bapi:        bapi,
 		remote:      rem,
 		parallelism: defaultPullParallelism,
 		progCh:      make(chan dag.Completion),
 		reqCh:       make(chan string),
-		resCh:       make(chan PullRes),
+		resCh:       make(chan BlockResponse),
 	}
 
 	return f, nil
 }
 
 // NewPullWithManifest creates a pull when we already have a manifest
-func NewPullWithManifest(ctx context.Context, mfst *dag.Manifest, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (pull *Pull, err error) {
-	f, err := NewPull(ctx, mfst.RootCID().String(), lng, bapi, rem)
+func NewPullWithManifest(mfst *dag.Manifest, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (pull *Pull, err error) {
+	f, err := NewPull(mfst.RootCID().String(), lng, bapi, rem)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +42,6 @@ type Pull struct {
 	path        string
 	mfst        *dag.Manifest
 	diff        *dag.Manifest
-	ctx         context.Context
 	remote      Remote
 	lng         ipld.NodeGetter
 	bapi        coreiface.BlockAPI
@@ -51,18 +49,18 @@ type Pull struct {
 	prog        dag.Completion
 	progCh      chan dag.Completion
 	reqCh       chan string
-	resCh       chan PullRes
+	resCh       chan BlockResponse
 }
 
-// PullRes is a response from a pull request
-type PullRes struct {
+// BlockResponse is a response from a pull request
+type BlockResponse struct {
 	Hash  string
 	Raw   []byte
 	Error error
 }
 
 // Do executes the pull, blocking until complete
-func (f *Pull) Do() (err error) {
+func (f *Pull) Do(ctx context.Context) (err error) {
 	// First Do requests a manifest from the remote node
 	// It determines the progress already made
 	// It begins to pull the blocks in parallel:
@@ -94,7 +92,7 @@ func (f *Pull) Do() (err error) {
 	//      request
 	if f.mfst == nil {
 		// request a manifest from the remote if we don't have one
-		if f.mfst, err = f.remote.PullManifest(f.ctx, f.path); err != nil {
+		if f.mfst, err = f.remote.GetManifest(ctx, f.path); err != nil {
 			return
 		}
 	}
@@ -132,7 +130,7 @@ func (f *Pull) Do() (err error) {
 	for i := 0; i < f.parallelism; i++ {
 		pullers[i] = puller{
 			id:     i,
-			ctx:    f.ctx,
+			ctx:    ctx,
 			remote: f.remote,
 			reqCh:  f.reqCh,
 			resCh:  f.resCh,
@@ -151,13 +149,13 @@ func (f *Pull) Do() (err error) {
 		for {
 			select {
 			case res := <-f.resCh:
-				go func(res PullRes) {
+				go func(res BlockResponse) {
 					if res.Error != nil {
 						errCh <- res.Error
 						return
 					}
 
-					bs, err := f.bapi.Put(f.ctx, bytes.NewReader(res.Raw))
+					bs, err := f.bapi.Put(ctx, bytes.NewReader(res.Raw))
 					if err != nil {
 						errCh <- res.Error
 					}
@@ -178,7 +176,7 @@ func (f *Pull) Do() (err error) {
 						return
 					}
 				}(res)
-			case <-f.ctx.Done():
+			case <-ctx.Done():
 				errCh <- nil
 			}
 		}
@@ -194,6 +192,11 @@ func (f *Pull) Do() (err error) {
 	return <-errCh
 }
 
+// Completion returns a read-only channel of updates to completion
+func (f *Pull) Completion() <-chan dag.Completion {
+	return f.progCh
+}
+
 func (f *Pull) completionChanged() {
 	f.progCh <- f.prog
 }
@@ -204,7 +207,7 @@ type puller struct {
 	remote Remote
 	ctx    context.Context
 	reqCh  <-chan string
-	resCh  chan PullRes
+	resCh  chan BlockResponse
 	stopCh chan bool
 }
 
@@ -217,8 +220,8 @@ func (f puller) start() {
 		select {
 		case hash := <-f.reqCh:
 			go func() {
-				data, err := f.remote.PullBlock(f.ctx, hash)
-				f.resCh <- PullRes{
+				data, err := f.remote.GetBlock(f.ctx, hash)
+				f.resCh <- BlockResponse{
 					Hash:  hash,
 					Raw:   data,
 					Error: err,

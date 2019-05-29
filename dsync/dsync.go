@@ -49,8 +49,18 @@
 package dsync
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"sync"
+	"time"
 
+	"github.com/ipfs/go-cid"
+	ipld "github.com/ipfs/go-ipld-format"
+	coreiface "github.com/ipfs/interface-go-ipfs-core"
+	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/qri-io/dag"
 )
 
@@ -68,15 +78,235 @@ const (
 
 // Remote is a source that can be synced to & from
 type Remote interface {
-	// PushStart requests a new send session from the remote, which will return a
+	// NewReceiveSession requests a new send session from the remote, which will return a
 	// delta manifest of blocks the remote needs and a session id that must
 	// be sent with each block
-	PushStart(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error)
-	// PushBlock places a block on the remote
-	PushBlock(sid, hash string, data []byte) Response
+	NewReceiveSession(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error)
+	// ReceiveBlock places a block on the remote
+	ReceiveBlock(sid, hash string, data []byte) ReceiveResponse
 
-	// PullManifest asks the remote for a manifest specified by the root ID of a DAG
-	PullManifest(ctx context.Context, path string) (mfst *dag.Manifest, err error)
-	// PullBlock gets a block from the remote
-	PullBlock(ctx context.Context, hash string) (rawdata []byte, err error)
+	// GetManifest asks the remote for a manifest specified by the root ID of a DAG
+	GetManifest(ctx context.Context, path string) (mfst *dag.Manifest, err error)
+	// GetBlock gets a block from the remote
+	GetBlock(ctx context.Context, hash string) (rawdata []byte, err error)
+}
+
+// DagCheck is a function that a remote will run before accepting a Dag. If
+// DagCheck returns an error, the remote will deny the request to push blocks,
+// no session will be created and the error message will be returned in the
+// response status
+type DagCheck func(context.Context, dag.Manifest) error
+
+// Dsync is a service for synchronizing a DAG of blocks between a local & remote
+// source
+type Dsync struct {
+	// local node getter
+	lng ipld.NodeGetter
+	// local block API for placing blocks
+	bapi coreiface.BlockAPI
+	// cache of dagInfo/manifests
+	infoStore dag.InfoStore
+
+	// if dagCheck isn't nil, it's called before creating a session.
+	dagCheck DagCheck
+	// http server accepting dsync requests
+	httpServer *http.Server
+	// inbound transfers in progress, will be nil if not acting as a remote
+	sessionLock    sync.Mutex
+	sessionPool    map[string]*Session
+	sessionCancels map[string]context.CancelFunc
+	sessionTTLDur  time.Duration
+}
+
+// compile-time assertion that Dsync satisfies the remote interface
+var _ Remote = (*Dsync)(nil)
+
+// Config encapsulates optional Dsync configuration
+type Config struct {
+	InfoStore         dag.InfoStore
+	HTTPRemoteAddress string
+	DagCheck          DagCheck
+}
+
+// New creates a local Dsync service. By default Dsync can push and pull to
+// remotes, and can be configured to act as a remote for other Dsync instances
+func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func(cfg *Config)) *Dsync {
+	cfg := &Config{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	ds := &Dsync{
+		lng:  localNodes,
+		bapi: blockStore,
+
+		sessionPool:    map[string]*Session{},
+		sessionCancels: map[string]context.CancelFunc{},
+		sessionTTLDur:  time.Hour * 5,
+	}
+
+	if cfg.InfoStore != nil {
+		ds.infoStore = cfg.InfoStore
+	}
+
+	if cfg.HTTPRemoteAddress != "" {
+		ds.httpServer = &http.Server{
+			Addr:    cfg.HTTPRemoteAddress,
+			Handler: HTTPRemoteHandler(ds),
+		}
+	}
+
+	return ds
+}
+
+// StartRemote makes dsync available for remote requests. StartRemote returns
+// immediately. Stop remote service by cancelling the passed-in context.
+func (ds *Dsync) StartRemote(ctx context.Context) error {
+	if ds.httpServer == nil {
+		return fmt.Errorf("dsync is not configured as a remote")
+	}
+
+	go func() {
+		<-ctx.Done()
+		if ds.httpServer != nil {
+			ds.httpServer.Close()
+		}
+	}()
+
+	if ds.httpServer != nil {
+		go ds.httpServer.ListenAndServe()
+	}
+
+	return nil
+}
+
+// NewPush creates a push from Dsync to a remote address
+func (ds *Dsync) NewPush(cidStr, remoteAddr string) (*Push, error) {
+	id, err := cid.Parse(cidStr)
+	if err != nil {
+		return nil, err
+	}
+	mfst, err := dag.NewManifest(context.Background(), ds.lng, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return ds.NewPushManifest(mfst, remoteAddr)
+}
+
+// NewPushManifest creates a push from an existing manifest. All blocks in the
+// manifest must be accessible from the local Dsync block repository
+func (ds *Dsync) NewPushManifest(mfst *dag.Manifest, remoteAddr string) (*Push, error) {
+	rem := &HTTPClient{URL: remoteAddr}
+	return NewPush(ds.lng, mfst, rem)
+}
+
+// NewPull creates a pull. A pull fetches an entire DAG from a remote, placing
+// it in the local block store
+func (ds *Dsync) NewPull(cidStr, remoteAddr string) (*Pull, error) {
+	rem := &HTTPClient{URL: remoteAddr}
+	return NewPull(cidStr, ds.lng, ds.bapi, rem)
+}
+
+// NewReceiveSession takes a manifest sent by a remote and initiates a
+// transfer session. It returns a manifest/diff of the blocks the reciever needs
+// to have a complete DAG new sessions are created with a deadline for completion
+func (ds *Dsync) NewReceiveSession(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
+	// TODO (b5) - figure out context passing
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(ds.sessionTTLDur))
+
+	if ds.dagCheck != nil {
+		if err = ds.dagCheck(ctx, *mfst); err != nil {
+			return
+		}
+	}
+
+	sess, err := NewSession(ctx, ds.lng, ds.bapi, mfst)
+	if err != nil {
+		cancel()
+		return
+	}
+	fmt.Printf("created receive push session. sid: %s. diff: %d nodes\n", sess.sid, len(sess.diff.Nodes))
+
+	ds.sessionLock.Lock()
+	defer ds.sessionLock.Unlock()
+	ds.sessionPool[sess.sid] = sess
+	ds.sessionCancels[sess.sid] = cancel
+
+	return sess.sid, sess.diff, nil
+}
+
+// ReceiveBlock adds one block to the local node that was sent by the remote
+// node It notes in the Receive which nodes have been added
+// When the DAG is complete, it puts the manifest into a DAG info and the
+// DAG info into an infoStore
+func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
+	sess, ok := ds.sessionPool[sid]
+	if !ok {
+		return ReceiveResponse{
+			Hash:   hash,
+			Status: StatusErrored,
+			Err:    fmt.Errorf("sid not found"),
+		}
+	}
+
+	// ReceiveBlock accepts a block from the sender, placing it in the local blockstore
+	res := sess.ReceiveBlock(hash, bytes.NewReader(data))
+
+	if res.Status == StatusOk && sess.Complete() {
+		// TODO (b5): move this into a "finalizeReceive" method on receivers
+		// This code will also need to be called if someone tries to sync a DAG that requires
+		// no blocks for an early termination, ensuring that we cache a dag.Info in that case
+		// as well
+		if ds.infoStore != nil {
+			di := &dag.Info{
+				Manifest: sess.mfst,
+			}
+			if err := ds.infoStore.PutDAGInfo(context.Background(), sess.mfst.Nodes[0], di); err != nil {
+				return ReceiveResponse{
+					Hash:   hash,
+					Status: StatusErrored,
+					Err:    err,
+				}
+			}
+		}
+		defer func() {
+			ds.sessionLock.Lock()
+			ds.sessionCancels[sid]()
+			delete(ds.sessionPool, sid)
+			ds.sessionLock.Unlock()
+		}()
+	}
+
+	return res
+}
+
+// GetManifest gets the manifest for a DAG rooted at id, checking any configured cache before falling back to generating a new manifest
+func (ds *Dsync) GetManifest(ctx context.Context, hash string) (mfst *dag.Manifest, err error) {
+	// check cache if one is specified
+	if ds.infoStore != nil {
+		var di *dag.Info
+		if di, err = ds.infoStore.DAGInfo(ctx, hash); err == nil {
+			fmt.Println("using cached manifest")
+			mfst = di.Manifest
+			return
+		}
+	}
+
+	id, err := cid.Parse(hash)
+	if err != nil {
+		return nil, err
+	}
+
+	return dag.NewManifest(ctx, ds.lng, id)
+}
+
+// GetBlock returns a single block from the store
+func (ds *Dsync) GetBlock(ctx context.Context, hash string) ([]byte, error) {
+	rdr, err := ds.bapi.Get(ctx, path.New(hash))
+	if err != nil {
+		return nil, err
+	}
+
+	return ioutil.ReadAll(rdr)
 }

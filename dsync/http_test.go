@@ -41,18 +41,18 @@ func TestSyncHTTP(t *testing.T) {
 	}
 
 	bGetter := &dag.NodeGetter{Dag: b.Dag()}
-	ts := NewTransfers(ctx, bGetter, b.Block())
-	s := httptest.NewServer(HTTPTransfersHandler(ts))
+	ts := New(bGetter, b.Block())
+	s := httptest.NewServer(HTTPRemoteHandler(ts))
 	defer s.Close()
 
 	cli := &HTTPClient{URL: s.URL}
 
-	push, err := NewPush(ctx, aGetter, mfst, cli)
+	push, err := NewPush(aGetter, mfst, cli)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := push.Do(); err != nil {
+	if err := push.Do(ctx); err != nil {
 		t.Error(err)
 	}
 
@@ -65,14 +65,14 @@ func TestSyncHTTP(t *testing.T) {
 
 // remote implements the Remote interface on a single receive session at a time
 type remote struct {
-	receive *Transfer
+	receive *Session
 	lng     ipld.NodeGetter
 	bapi    coreiface.BlockAPI
 }
 
 func (r *remote) PushStart(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
 	ctx := context.Background()
-	r.receive, err = NewTransfer(ctx, r.lng, r.bapi, mfst)
+	r.receive, err = NewSession(ctx, r.lng, r.bapi, mfst)
 	if err != nil {
 		return
 	}
@@ -81,7 +81,7 @@ func (r *remote) PushStart(mfst *dag.Manifest) (sid string, diff *dag.Manifest, 
 	return
 }
 
-func (r *remote) PushBlock(sid, hash string, data []byte) Response {
+func (r *remote) PushBlock(sid, hash string, data []byte) ReceiveResponse {
 	return r.receive.ReceiveBlock(hash, bytes.NewReader(data))
 }
 
@@ -94,7 +94,7 @@ func (r *remote) PullManifest(ctx context.Context, hash string) (mfst *dag.Manif
 	return dag.NewManifest(ctx, r.lng, id)
 }
 
-func (r *remote) PullBlock(ctx context.Context, hash string) ([]byte, error) {
+func (r *remote) GetBlock(ctx context.Context, hash string) ([]byte, error) {
 	id, err := cid.Parse(hash)
 	if err != nil {
 		return nil, err

@@ -11,8 +11,8 @@ import (
 	"github.com/qri-io/dag"
 )
 
-// Session tracks the state of a transfer
-type Session struct {
+// session tracks the state of a transfer
+type session struct {
 	sid    string
 	ctx    context.Context
 	lng    ipld.NodeGetter
@@ -24,8 +24,8 @@ type Session struct {
 	progCh chan dag.Completion
 }
 
-// NewSession creates a receive state machine
-func NewSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAPI, mfst *dag.Manifest, pinOnComplete bool) (*Session, error) {
+// newSession creates a receive state machine
+func newSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAPI, mfst *dag.Manifest, pinOnComplete bool) (*session, error) {
 	// TODO (b5): ipfs api/v0/get/block doesn't allow checking for local blocks yet
 	// aren't working over ipfs api, so we can't do delta's quite yet. Just send the whole things back
 	diff := mfst
@@ -35,7 +35,7 @@ func NewSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAP
 	// 	return nil, err
 	// }
 
-	s := &Session{
+	s := &session{
 		sid:    randStringBytesMask(10),
 		ctx:    ctx,
 		lng:    lng,
@@ -53,7 +53,7 @@ func NewSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAP
 }
 
 // ReceiveBlock accepts a block from the sender, placing it in the local blockstore
-func (s *Session) ReceiveBlock(hash string, data io.Reader) ReceiveResponse {
+func (s *session) ReceiveBlock(hash string, data io.Reader) ReceiveResponse {
 	bstat, err := s.bapi.Put(s.ctx, data)
 
 	if err != nil {
@@ -88,11 +88,11 @@ func (s *Session) ReceiveBlock(hash string, data io.Reader) ReceiveResponse {
 }
 
 // Complete returns if this receive session is finished or not
-func (s *Session) Complete() bool {
+func (s *session) Complete() bool {
 	return s.prog.Complete()
 }
 
-func (s *Session) completionChanged() {
+func (s *session) completionChanged() {
 	s.progCh <- s.prog
 }
 

@@ -9,22 +9,22 @@ import (
 	"github.com/qri-io/dag"
 )
 
-// ReceiveResponseStatus defines types of results for a request
-type ReceiveResponseStatus int
+// receiveResponseStatus defines types of results for a request
+type receiveResponseStatus int
 
 const (
 	// StatusErrored igondicates the request failed and cannot be retried
-	StatusErrored ReceiveResponseStatus = -1
+	StatusErrored receiveResponseStatus = -1
 	// StatusOk indicates the request completed successfully
-	StatusOk ReceiveResponseStatus = 0
+	StatusOk receiveResponseStatus = 0
 	// StatusRetry indicates the request can be attempted again
-	StatusRetry ReceiveResponseStatus = 1
+	StatusRetry receiveResponseStatus = 1
 )
 
-// ReceiveResponse defines the result of sending a block, or attempting to send a block.
-type ReceiveResponse struct {
+// receiveResponse defines the result of sending a block, or attempting to send a block.
+type receiveResponse struct {
 	Hash   string
-	Status ReceiveResponseStatus
+	Status receiveResponseStatus
 	Err    error
 }
 
@@ -40,7 +40,7 @@ type Push struct {
 	prog          dag.Completion  // progress state
 	progCh        chan dag.Completion
 	blocksCh      chan string
-	responses     chan ReceiveResponse
+	responses     chan receiveResponse
 	retries       chan string
 }
 
@@ -60,7 +60,7 @@ func NewPush(lng ipld.NodeGetter, mfst *dag.Manifest, remote Remote, pinOnComple
 		parallelism:   parallelism,
 		blocksCh:      make(chan string),
 		progCh:        make(chan dag.Completion),
-		responses:     make(chan ReceiveResponse),
+		responses:     make(chan receiveResponse),
 		retries:       make(chan string),
 	}
 	return ps, nil
@@ -137,7 +137,7 @@ func (snd *Push) doActualPush(ctx context.Context) (err error) {
 		// handle *all* responses from senders. it's very important that this loop
 		// never block, so all responses are handled in their own goroutine
 		for res := range snd.responses {
-			go func(r ReceiveResponse) {
+			go func(r receiveResponse) {
 				switch r.Status {
 				case StatusOk:
 					// this is the only place we should modify progress after creation
@@ -206,7 +206,7 @@ type sender struct {
 	lng       ipld.NodeGetter
 	remote    Remote
 	blocksCh  chan string
-	responses chan ReceiveResponse
+	responses chan receiveResponse
 	stopCh    chan bool
 }
 
@@ -222,7 +222,7 @@ func (s sender) start() {
 			go func() {
 				id, err := cid.Parse(hash)
 				if err != nil {
-					s.responses <- ReceiveResponse{
+					s.responses <- receiveResponse{
 						Hash:   hash,
 						Status: StatusErrored,
 						Err:    err,
@@ -230,7 +230,7 @@ func (s sender) start() {
 				}
 				node, err := s.lng.Get(s.ctx, id)
 				if err != nil {
-					s.responses <- ReceiveResponse{
+					s.responses <- receiveResponse{
 						Hash:   hash,
 						Status: StatusErrored,
 						Err:    err,

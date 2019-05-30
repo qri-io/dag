@@ -85,8 +85,9 @@ type Remote interface {
 	// ReceiveBlock places a block on the remote
 	ReceiveBlock(sid, hash string, data []byte) ReceiveResponse
 
-	// GetManifest asks the remote for a manifest specified by the root ID of a DAG
-	GetManifest(ctx context.Context, path string) (mfst *dag.Manifest, err error)
+	// GetManifest asks the remote for a manifest specified by a the root
+	// identientifier string of a DAG
+	GetManifest(ctx context.Context, cidStr string) (mfst *dag.Manifest, err error)
 	// GetBlock gets a block from the remote
 	GetBlock(ctx context.Context, hash string) (rawdata []byte, err error)
 }

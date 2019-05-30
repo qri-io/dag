@@ -21,7 +21,7 @@ func NewPull(cidStr string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Re
 		parallelism: defaultPullParallelism,
 		progCh:      make(chan dag.Completion),
 		reqCh:       make(chan string),
-		resCh:       make(chan BlockResponse),
+		resCh:       make(chan blockResponse),
 	}
 
 	return f, nil
@@ -49,11 +49,11 @@ type Pull struct {
 	prog        dag.Completion
 	progCh      chan dag.Completion
 	reqCh       chan string
-	resCh       chan BlockResponse
+	resCh       chan blockResponse
 }
 
-// BlockResponse is a response from a pull request
-type BlockResponse struct {
+// blockResponse is a response from a pull request
+type blockResponse struct {
 	Hash  string
 	Raw   []byte
 	Error error
@@ -149,7 +149,7 @@ func (f *Pull) Do(ctx context.Context) (err error) {
 		for {
 			select {
 			case res := <-f.resCh:
-				go func(res BlockResponse) {
+				go func(res blockResponse) {
 					if res.Error != nil {
 						errCh <- res.Error
 						return
@@ -207,7 +207,7 @@ type puller struct {
 	remote Remote
 	ctx    context.Context
 	reqCh  <-chan string
-	resCh  chan BlockResponse
+	resCh  chan blockResponse
 	stopCh chan bool
 }
 
@@ -221,7 +221,7 @@ func (f puller) start() {
 		case hash := <-f.reqCh:
 			go func() {
 				data, err := f.remote.GetBlock(f.ctx, hash)
-				f.resCh <- BlockResponse{
+				f.resCh <- blockResponse{
 					Hash:  hash,
 					Raw:   data,
 					Error: err,

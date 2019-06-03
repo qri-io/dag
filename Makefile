@@ -8,9 +8,6 @@ lint:
 test:
 	go test ./... -v --coverprofile=coverage.txt --covermode=atomic
 
-test-all-coverage:
-	./.circleci/cover.test.sh
-
 update-changelog:
 	conventional-changelog -p angular -i CHANGELOG.md -s
 

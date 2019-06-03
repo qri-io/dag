@@ -2,19 +2,20 @@ package dag
 
 import (
 	"context"
-	ipld "gx/ipfs/QmR7TcHkR9nxkUorfi8XMTAMLUK7GiP64TWWBzY3aacc1o/go-ipld-format"
 	"testing"
+
+	ipld "github.com/ipfs/go-ipld-format"
 )
 
 func TestInfoAtIndex(t *testing.T) {
 	content = 0
 
-	a := newNode(10) // zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8
-	b := newNode(20) // zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz
-	c := newNode(30) // zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ
-	d := newNode(40) // zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP
-	e := newNode(50) // zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV
-	f := newNode(60) // zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6
+	a := newNode(10) // bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e
+	b := newNode(20) // bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm
+	c := newNode(30) // bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu
+	d := newNode(40) // bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy
+	e := newNode(50) // bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri
+	f := newNode(60) // bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu
 	a.links = []*node{b, c}
 	c.links = []*node{d, e}
 	d.links = []*node{f}
@@ -34,10 +35,10 @@ func TestInfoAtIndex(t *testing.T) {
 	expSubInfoAtC := &Info{
 		Manifest: &Manifest{
 			Nodes: []string{
-				"zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ", // c
-				"zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP", // d
-				"zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV", // e
-				"zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", // f
+				"bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu", // c
+				"bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy", // d
+				"bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri", // e
+				"bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu", // f
 			},
 			Links: [][2]int{
 				{0, 1}, {0, 2}, {1, 3},
@@ -50,7 +51,7 @@ func TestInfoAtIndex(t *testing.T) {
 	expSubInfoAtF := &Info{
 		Manifest: &Manifest{
 			Nodes: []string{
-				"zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", // f
+				"bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu", // f
 			},
 			Links: [][2]int{},
 		},

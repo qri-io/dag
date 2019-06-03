@@ -3,30 +3,25 @@ package dag
 import (
 	"context"
 
-	"gx/ipfs/QmPSQnBKM9g7BaUcZCvswUJVscQ1ipjmwxN5PXCjkp9EQ7/go-cid"
-	ipld "gx/ipfs/QmR7TcHkR9nxkUorfi8XMTAMLUK7GiP64TWWBzY3aacc1o/go-ipld-format"
-	coreiface "gx/ipfs/QmUJYo4etAQqFfSS2rarFAE97eNGB8ej64YkRT2SmsYD4r/go-ipfs/core/coreapi/interface"
+	"github.com/ipfs/go-cid"
+	ipld "github.com/ipfs/go-ipld-format"
 )
 
 // NodeGetter wraps the go-ipfs DagAPI to satistfy the IPLD NodeGetter interface
 type NodeGetter struct {
-	Dag coreiface.DagAPI
+	Dag ipld.DAGService
 }
 
 // NewNodeGetter returns a new NodeGetter from an IPFS core API
-func NewNodeGetter(capi coreiface.CoreAPI) *NodeGetter {
-	return &NodeGetter{Dag: capi.Dag()}
+func NewNodeGetter(dsvc ipld.DAGService) *NodeGetter {
+	return &NodeGetter{Dag: dsvc}
 }
 
 // Get retrieves nodes by CID. Depending on the NodeGetter
 // implementation, this may involve fetching the Node from a remote
 // machine; consider setting a deadline in the context.
 func (ng *NodeGetter) Get(ctx context.Context, id cid.Cid) (ipld.Node, error) {
-	path, err := coreiface.ParsePath(id.String())
-	if err != nil {
-		return nil, err
-	}
-	return ng.Dag.Get(ctx, path)
+	return ng.Dag.Get(ctx, id)
 }
 
 // GetMany returns a channel of NodeOptions given a set of CIDs.

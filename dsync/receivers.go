@@ -12,9 +12,10 @@ import (
 
 	"github.com/qri-io/dag"
 
-	"gx/ipfs/QmPSQnBKM9g7BaUcZCvswUJVscQ1ipjmwxN5PXCjkp9EQ7/go-cid"
-	ipld "gx/ipfs/QmR7TcHkR9nxkUorfi8XMTAMLUK7GiP64TWWBzY3aacc1o/go-ipld-format"
-	coreiface "gx/ipfs/QmUJYo4etAQqFfSS2rarFAE97eNGB8ej64YkRT2SmsYD4r/go-ipfs/core/coreapi/interface"
+	"github.com/ipfs/go-cid"
+	ipld "github.com/ipfs/go-ipld-format"
+	coreiface "github.com/ipfs/interface-go-ipfs-core"
+	"github.com/ipfs/interface-go-ipfs-core/path"
 )
 
 // NewReceivers allocates a Receivers pointer
@@ -135,12 +136,7 @@ func (rs *Receivers) ReqManifest(ctx context.Context, hash string) (mfst *dag.Ma
 
 // GetBlock returns a single block from the store
 func (rs *Receivers) GetBlock(ctx context.Context, hash string) ([]byte, error) {
-	path, err := coreiface.ParsePath(hash)
-	if err != nil {
-		return nil, err
-	}
-
-	rdr, err := rs.bapi.Get(ctx, path)
+	rdr, err := rs.bapi.Get(ctx, path.New(hash))
 	if err != nil {
 		return nil, err
 	}

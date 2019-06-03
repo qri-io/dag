@@ -10,8 +10,8 @@ import (
 	"github.com/multiformats/go-multihash"
 	"github.com/ugorji/go/codec"
 
-	"gx/ipfs/QmPSQnBKM9g7BaUcZCvswUJVscQ1ipjmwxN5PXCjkp9EQ7/go-cid"
-	ipld "gx/ipfs/QmR7TcHkR9nxkUorfi8XMTAMLUK7GiP64TWWBzY3aacc1o/go-ipld-format"
+	"github.com/ipfs/go-cid"
+	ipld "github.com/ipfs/go-ipld-format"
 )
 
 func TestGraphManifestSizeRato(t *testing.T) {
@@ -54,12 +54,12 @@ func TestGraphManifestSizeRato(t *testing.T) {
 func TestNewManifest(t *testing.T) {
 	content = 0
 
-	a := newNode(10) // zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8
-	b := newNode(20) // zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz
-	c := newNode(30) // zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ
-	d := newNode(40) // zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP
-	e := newNode(50) // zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV
-	f := newNode(60) // zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6
+	a := newNode(10) // bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e
+	b := newNode(20) // bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm
+	c := newNode(30) // bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu
+	d := newNode(40) // bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy
+	e := newNode(50) // bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri
+	f := newNode(60) // bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu
 	a.links = []*node{b, c}
 	c.links = []*node{d, e}
 	d.links = []*node{f}
@@ -73,12 +73,12 @@ func TestNewManifest(t *testing.T) {
 
 	exp := &Manifest{
 		Nodes: []string{
-			"zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8", // a
-			"zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ", // c
-			"zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP", // d
-			"zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV", // e
-			"zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz", // b
-			"zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", // f
+			"bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e", // a
+			"bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu", // c
+			"bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy", // d
+			"bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri", // e
+			"bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm", // b
+			"bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu", // f
 		},
 		Links: [][2]int{
 			{0, 1}, {0, 4}, {1, 2}, {1, 3}, {2, 5},
@@ -91,12 +91,12 @@ func TestNewManifest(t *testing.T) {
 func TestIDIndex(t *testing.T) {
 	content = 0
 
-	a := newNode(10) // zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8
-	b := newNode(20) // zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz
-	c := newNode(30) // zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ
-	d := newNode(40) // zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP
-	e := newNode(50) // zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV
-	f := newNode(60) // zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6
+	a := newNode(10) // bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e
+	b := newNode(20) // bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm
+	c := newNode(30) // bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu
+	d := newNode(40) // bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy
+	e := newNode(50) // bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri
+	f := newNode(60) // bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu
 	a.links = []*node{b, c}
 	c.links = []*node{d, e}
 	d.links = []*node{f}
@@ -113,12 +113,12 @@ func TestIDIndex(t *testing.T) {
 		expIndex int
 	}{
 		{"bad id", -1},
-		{"zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8", 0},
-		{"zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ", 1},
-		{"zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP", 2},
-		{"zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV", 3},
-		{"zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz", 4},
-		{"zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", 5},
+		{"bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e", 0},
+		{"bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu", 1},
+		{"bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy", 2},
+		{"bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri", 3},
+		{"bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm", 4},
+		{"bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu", 5},
 	}
 
 	for i, c := range cases {
@@ -132,12 +132,12 @@ func TestIDIndex(t *testing.T) {
 func TestNewInfo(t *testing.T) {
 	content = 0
 
-	a := newNode(10) // zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8
-	b := newNode(20) // zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz
-	c := newNode(30) // zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ
-	d := newNode(40) // zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP
-	e := newNode(50) // zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV
-	f := newNode(60) // zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6
+	a := newNode(10) // bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e
+	b := newNode(20) // bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm
+	c := newNode(30) // bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu
+	d := newNode(40) // bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy
+	e := newNode(50) // bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri
+	f := newNode(60) // bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu
 	a.links = []*node{b, c}
 	c.links = []*node{d, e}
 	d.links = []*node{f}
@@ -152,12 +152,12 @@ func TestNewInfo(t *testing.T) {
 	exp := &Info{
 		Manifest: &Manifest{
 			Nodes: []string{
-				"zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8", // a
-				"zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ", // c
-				"zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP", // d
-				"zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV", // e
-				"zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz", // b
-				"zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", // f
+				"bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e", // a
+				"bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu", // c
+				"bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy", // d
+				"bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri", // e
+				"bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm", // b
+				"bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu", // f
 			},
 			Links: [][2]int{
 				{0, 1}, {0, 4}, {1, 2}, {1, 3}, {2, 5},
@@ -183,12 +183,12 @@ func TestNewInfo(t *testing.T) {
 func TestAddLabel(t *testing.T) {
 	content = 0
 
-	a := newNode(10) // zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8
-	b := newNode(20) // zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz
-	c := newNode(30) // zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ
-	d := newNode(40) // zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP
-	e := newNode(50) // zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV
-	f := newNode(60) // zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6
+	a := newNode(10) // bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e
+	b := newNode(20) // bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm
+	c := newNode(30) // bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu
+	d := newNode(40) // bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy
+	e := newNode(50) // bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri
+	f := newNode(60) // bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu
 	a.links = []*node{b, c}
 	c.links = []*node{d, e}
 	d.links = []*node{f}
@@ -233,12 +233,12 @@ func TestAddLabel(t *testing.T) {
 func TestAddLabelByID(t *testing.T) {
 	content = 0
 
-	a := newNode(10) // zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8
-	b := newNode(20) // zb2rhdt1wgqfpzMgYf7mefxCWToqUTTyriWA1ctNxmy5WojSz
-	c := newNode(30) // zb2rhkwbf5N999rJcRX3D89PVDibZXnctArZFkap4CB36QcAQ
-	d := newNode(40) // zb2rhbtsQanqdtuvSceyeKUcT4ao1ge7HULRuRbueGjznWsDP
-	e := newNode(50) // zb2rhbhaFdd82br6cP9uUjxQxUyrMFwR3K6uYt6YvUxJtgpSV
-	f := newNode(60) // zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6
+	a := newNode(10) // bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e
+	b := newNode(20) // bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm
+	c := newNode(30) // bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu
+	d := newNode(40) // bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy
+	e := newNode(50) // bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri
+	f := newNode(60) // bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu
 	a.links = []*node{b, c}
 	c.links = []*node{d, e}
 	d.links = []*node{f}
@@ -255,8 +255,8 @@ func TestAddLabelByID(t *testing.T) {
 		err       error
 	}{
 		{"bad id", "BAD ID", ErrIDNotFound},
-		{"root", "zb2rhd6jTUt94FLVLjrCJ6Wy3NMDxm2sDuwArDfuDaNeHGRi8", nil},
-		{"leaf", "zb2rhnjvVfrzHtyeBcrCt3QUshMoYvEaxPXDykT4MyWvTCKV6", nil},
+		{"root", "bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e", nil},
+		{"leaf", "bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu", nil},
 	}
 
 	for i, c := range cases {

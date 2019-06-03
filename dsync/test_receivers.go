@@ -5,10 +5,11 @@ import (
 	"io"
 	"time"
 
-	cid "gx/ipfs/QmPSQnBKM9g7BaUcZCvswUJVscQ1ipjmwxN5PXCjkp9EQ7/go-cid"
-	ipld "gx/ipfs/QmR7TcHkR9nxkUorfi8XMTAMLUK7GiP64TWWBzY3aacc1o/go-ipld-format"
-	coreiface "gx/ipfs/QmUJYo4etAQqFfSS2rarFAE97eNGB8ej64YkRT2SmsYD4r/go-ipfs/core/coreapi/interface"
-	"gx/ipfs/QmUJYo4etAQqFfSS2rarFAE97eNGB8ej64YkRT2SmsYD4r/go-ipfs/core/coreapi/interface/options"
+	cid "github.com/ipfs/go-cid"
+	ipld "github.com/ipfs/go-ipld-format"
+	coreiface "github.com/ipfs/interface-go-ipfs-core"
+	"github.com/ipfs/interface-go-ipfs-core/options"
+	"github.com/ipfs/interface-go-ipfs-core/path"
 )
 
 // NewTestReceivers returns a Receivers pointer suitable for testing, and not much else
@@ -47,14 +48,14 @@ func (t *testBlockAPI) Put(context.Context, io.Reader, ...options.BlockPutOption
 	return nil, nil
 }
 
-func (t *testBlockAPI) Get(context.Context, coreiface.Path) (io.Reader, error) {
+func (t *testBlockAPI) Get(context.Context, path.Path) (io.Reader, error) {
 	return nil, nil
 }
 
-func (t *testBlockAPI) Rm(context.Context, coreiface.Path, ...options.BlockRmOption) error {
+func (t *testBlockAPI) Rm(context.Context, path.Path, ...options.BlockRmOption) error {
 	return nil
 }
 
-func (t *testBlockAPI) Stat(context.Context, coreiface.Path) (coreiface.BlockStat, error) {
+func (t *testBlockAPI) Stat(context.Context, path.Path) (coreiface.BlockStat, error) {
 	return nil, nil
 }

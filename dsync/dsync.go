@@ -1,15 +1,15 @@
-// Package dsync implements point-to-point merkle-DAG-syncing between a local 
+// Package dsync implements point-to-point merkle-DAG-syncing between a local
 // instance and remote source. It's like rsync, but specific to merkle-DAGs.
 // dsync operates over HTTP and (soon) libp2p connections.
 //
 // dsync by default can push & fetch DAGs to another dsync instance, called
-// the "remote". Dsync instances that want to accept merkle-DAGs must opt into 
+// the "remote". Dsync instances that want to accept merkle-DAGs must opt into
 // operating as a remote by configuring a dsync.Dsync instance to do so
-// 
-// Dsync is structured as bring-your-own DAG vetting. All push requests are 
+//
+// Dsync is structured as bring-your-own DAG vetting. All push requests are
 // run through two "check" functions called at the beginning and and of the
 // push process. Each check function supplies details about the push being
-// requested or completed. The default intial check function rejects all 
+// requested or completed. The default intial check function rejects all
 // requests, and must be overridden to accept data
 package dsync
 
@@ -51,7 +51,7 @@ type Remote interface {
 	// ReceiveBlock places a block on the remote
 	ReceiveBlock(sid, hash string, data []byte) ReceiveResponse
 
-	// GetDagInfo asks the remote for info specified by a the root identifier 
+	// GetDagInfo asks the remote for info specified by a the root identifier
 	// string of a DAG
 	GetDagInfo(ctx context.Context, cidStr string) (info *dag.Info, err error)
 	// GetBlock gets a block of data from the remote
@@ -59,11 +59,11 @@ type Remote interface {
 }
 
 // DagPreCheck is a function that a remote will run before beginning a transfer.
-// If DagCheck returns an error, the remote will deny the request to push any 
-// blocks, no session will be created and the error message will be returned 
+// If DagCheck returns an error, the remote will deny the request to push any
+// blocks, no session will be created and the error message will be returned
 // in the response status. DagPreCheck is the right to place to implement
 // peerID and contentID accept/reject lists.
-// 
+//
 // DagPreCheck can also reject based on size limitations by examining data
 // provided by the requester, but be advised the Info provided is gossip at
 // this point in the sync process.
@@ -74,11 +74,11 @@ var DefaultDagPrecheck = func(context.Context, dag.Info) error {
 	return fmt.Errorf("remote is not configured to accept DAGs")
 }
 
-// DagFinalCheck is a function remote will call occurs after the requested push 
+// DagFinalCheck is a function remote will call occurs after the requested push
 // has transferred blocks to the remote, giving the remote a chance to work with
 // the data that's been sent before making a final decision on weather or not
 // to keep the data in question. If DagFinalCheck returns an error the transfer
-// is halted, returning the error message to the remote. 
+// is halted, returning the error message to the remote.
 // any request to pin the data will be skipped.
 // TODO (b5): blocks pushed by a rejected transfer must be explicitly removed
 type DagFinalCheck func(context.Context, dag.Info) error
@@ -100,13 +100,12 @@ type Dsync struct {
 	// api for pinning blocks
 	pin coreiface.PinAPI
 
-
 	// preCheck is called before creating a receive session
 	preCheck DagPreCheck
 	// dagFinalCheck is called before finalizing a receive session
 	finalCheck DagFinalCheck
 	// http server accepting dsync requests
-	httpServer *http.Server
+	httpServer       *http.Server
 	requireAllBlocks bool
 	// inbound transfers in progress, will be nil if not acting as a remote
 	sessionLock    sync.Mutex
@@ -121,14 +120,14 @@ var _ Remote = (*Dsync)(nil)
 // Config encapsulates optional Dsync configuration
 type Config struct {
 	// InfoStore is an optional caching layer for dag.Info objects
-	InfoStore         dag.InfoStore
+	InfoStore dag.InfoStore
 	// provide a listening addres to have Dsync spin up an HTTP server when
 	// StartRemote(ctx) is called
 	HTTPRemoteAddress string
-	// PinAPI is required for remotes to accept 
-	PinAPI            coreiface.PinAPI
+	// PinAPI is required for remotes to accept
+	PinAPI coreiface.PinAPI
 	// User-Supplied PreCheck function for a remote accepting DAGs
-	PreCheck          DagPreCheck
+	PreCheck DagPreCheck
 	// User-Supplied Final check function for a remote accepting DAGs
 	FinalCheck DagFinalCheck
 	// RequireAllBlocks will skip checking for blocks already present on the
@@ -148,10 +147,14 @@ func (cfg *Config) Validate() error {
 }
 
 // New creates a local Dsync service. By default Dsync can push and pull to
-// remotes. It can be configured to act as a remote for other Dsync instances
+// remotes. It can be configured to act as a remote for other Dsync instances.
+//
+// Its crucial that the NodeGetter passed to New be a offline-only.
+// if using IPFS this package defines a helper function: NewLocalNodeGetter
+// to get an offline-only node getter
 func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func(cfg *Config)) (*Dsync, error) {
 	cfg := &Config{
-		PreCheck: DefaultDagPrecheck,
+		PreCheck:   DefaultDagPrecheck,
 		FinalCheck: DefaultDagFinalCheck,
 	}
 
@@ -167,8 +170,8 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 		lng:  localNodes,
 		bapi: blockStore,
 
-		preCheck: cfg.PreCheck,
-		finalCheck: cfg.FinalCheck,
+		preCheck:       cfg.PreCheck,
+		finalCheck:     cfg.FinalCheck,
 		sessionPool:    map[string]*session{},
 		sessionCancels: map[string]context.CancelFunc{},
 		sessionTTLDur:  time.Hour * 5,
@@ -191,9 +194,9 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 	return ds, nil
 }
 
-// StartRemote makes dsync available for remote requests, starting an HTTP 
+// StartRemote makes dsync available for remote requests, starting an HTTP
 // server if a listening address is specified.
-// StartRemote returns immediately. Stop remote service by cancelling 
+// StartRemote returns immediately. Stop remote service by cancelling
 // the passed-in context.
 func (ds *Dsync) StartRemote(ctx context.Context) error {
 	if ds.httpServer == nil {
@@ -265,7 +268,6 @@ func (ds *Dsync) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid stri
 		cancel()
 		return
 	}
-	fmt.Printf("created receive push session. sid: %s. diff: %d nodes\n", sess.id, len(sess.diff.Nodes))
 
 	ds.sessionLock.Lock()
 	defer ds.sessionLock.Unlock()
@@ -296,9 +298,9 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 	if res.Status == StatusOk && sess.Complete() {
 		if err := ds.finalizeReceive(sess); err != nil {
 			return ReceiveResponse{
-				Hash: sess.info.RootCID().String(),
+				Hash:   sess.info.RootCID().String(),
 				Status: StatusErrored,
-				Err: err,
+				Err:    err,
 			}
 		}
 	}
@@ -307,34 +309,34 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 }
 
 // TODO (b5): needs to be called if someone tries to sync a DAG that requires
-// no blocks for an early termination, ensuring that we cache a dag.Info in 
+// no blocks for an early termination, ensuring that we cache a dag.Info in
 // that case as well
 func (ds *Dsync) finalizeReceive(sess *session) error {
-		if err := ds.finalCheck(sess.ctx, *sess.info); err != nil {
+	if err := ds.finalCheck(sess.ctx, *sess.info); err != nil {
+		return err
+	}
+
+	if ds.infoStore != nil {
+		di := sess.info
+		if err := ds.infoStore.PutDAGInfo(sess.ctx, sess.info.Manifest.Nodes[0], di); err != nil {
 			return err
 		}
+	}
 
-		if ds.infoStore != nil {
-			di := sess.info
-			if err := ds.infoStore.PutDAGInfo(sess.ctx, sess.info.Manifest.Nodes[0], di); err != nil {
-				return err
-			}
+	if sess.pin {
+		if err := ds.pin.Add(sess.ctx, path.New(sess.info.Manifest.Nodes[0])); err != nil {
+			return err
 		}
+	}
 
-		if sess.pin {
-			if err := ds.pin.Add(sess.ctx, path.New(sess.info.Manifest.Nodes[0])); err != nil {
-				return err
-			}
-		}
+	defer func() {
+		ds.sessionLock.Lock()
+		ds.sessionCancels[sess.id]()
+		delete(ds.sessionPool, sess.id)
+		ds.sessionLock.Unlock()
+	}()
 
-		defer func() {
-			ds.sessionLock.Lock()
-			ds.sessionCancels[sess.id]()
-			delete(ds.sessionPool, sess.id)
-			ds.sessionLock.Unlock()
-		}()
-
-		return nil
+	return nil
 }
 
 // GetDagInfo gets the manifest for a DAG rooted at id, checking any configured cache before falling back to generating a new manifest

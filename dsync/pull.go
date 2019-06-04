@@ -61,35 +61,19 @@ type blockResponse struct {
 
 // Do executes the pull, blocking until complete
 func (f *Pull) Do(ctx context.Context) (err error) {
-	// First Do requests a manifest from the remote node
-	// It determines the progress already made
-	// It begins to pull the blocks in parallel:
-	// 		- we create a number of pullers
-	//    - these pullers listen for incoming ids on the request channel
-	//      they request the blocks of these hash from the remote & send the responses
-	//      to the response channel
-	//    - we create an error channel, sending anything on this channel triggers an end
-	//      to the while process
-	//    - we then create loop that listens on the response channel for
-	//      pull responses:
-	//      - if there is a valid response, we put the incoming block into our local store
-	//      - if there is an error response, we send the error over the error channel
-	//      - if we have finished pulling all the blocks, we send nil over the error channel
-	//      - if at anytime we get a timeout aka an alert from context.Done(), we
-	//        also send over the error response
-	//    - we set up a loop that actually fills the request
-	//      channel with ids we want the puller to pull
-	//    - These ids are read by the pullers in parallel, they send the requests the
-	//      to the remote
-	//
-	// so three main things:
-	//   1) set up the process for pulling the blocks from the remote
-	//   2) set up the process for handling the responses from the remote
-	//   		(putting the blocks into the local store, erroring, triggering
-	//       a completion when all blocks have been pulled, or triggering a
-	//       timeout)
-	//   3) set up the process for telling the pullers which blocks to
-	//      request
+	// How pulling works:
+	// * request a dag.Info from the remote node
+	// * determines the progress already made by checking for local blocks
+	//   from the manifest
+	// * begin to pull the blocks in parallel:
+	// 		- create a number of pullers
+	//    - each puller listens for incoming ids on the request channel
+	//      they request the blocks of these hash from the remote & send the
+	//      responses to the response channel
+	//    - listen for pull responses. responses have two possible outcomes:
+	//      - valid hash response: put the incoming block into our local store
+	//      - error: send the error over the error channel & bail
+	//    - every time we receive a block, check if we're done
 	if f.info == nil {
 		// request a manifest from the remote if we don't have one
 		if f.info, err = f.remote.GetDagInfo(ctx, f.path); err != nil {
@@ -97,30 +81,22 @@ func (f *Pull) Do(ctx context.Context) (err error) {
 		}
 	}
 
-	// TODO (ramfox): Right now, Missing uses the nodegetter method Get
-	// if you are online, this method attempts to the get the blocks off
-	// the network, not only locally. This takes a long time and makes
-	// Missing unusable as of right now. Instead, we are passing
-	// NewCompletion an empty diff Manifest. We will be asking the remote
-	// source for the entire list of blocks, and although in certain cases
-	// this may be redundant, it is ultimately faster until we can change Missing
-	// f.diff, err = dag.Missing(f.ctx, f.lng, f.mfst)
-	// if err != nil {
-	// 	return
-	// }
-	f.diff = &dag.Manifest{Nodes: f.info.Manifest.Nodes}
+	f.diff, err = dag.Missing(ctx, f.lng, f.info.Manifest)
+	if err != nil {
+		return
+	}
+
 	f.prog = dag.NewCompletion(f.info.Manifest, f.diff)
 	go f.completionChanged()
-	// defer close(f.progCh)
 
 	if f.prog.Complete() {
 		return nil
 	}
 
-	// TODO (b5): this is really terrible to print here, but is *very* helpful info on the CLI
-	// we should pipe a completion channel up to the CLI & remove this
-	fmt.Printf("   pulling %d blocks\n", len(f.diff.Nodes))
+	return f.do(ctx)
+}
 
+func (f *Pull) do(ctx context.Context) error {
 	if len(f.diff.Nodes) < f.parallelism {
 		f.parallelism = len(f.diff.Nodes)
 	}
@@ -192,8 +168,8 @@ func (f *Pull) Do(ctx context.Context) (err error) {
 	return <-errCh
 }
 
-// Completion returns a read-only channel of updates to completion
-func (f *Pull) Completion() <-chan dag.Completion {
+// Updates returns a read-only channel of pull completion changes
+func (f *Pull) Updates() <-chan dag.Completion {
 	return f.progCh
 }
 

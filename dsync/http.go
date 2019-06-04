@@ -47,9 +47,7 @@ func (rem *HTTPClient) NewReceiveSession(info *dag.Info, pinOnComplete bool) (si
 	sid = res.Header.Get("sid")
 	diff = &dag.Manifest{}
 	err = json.NewDecoder(res.Body).Decode(diff)
-	// TODO (b5): this is really terrible to print here, but is *very* helpful info on the CLI
-	// we should pipe a completion channel up to the CLI & remove this
-	fmt.Printf("   sending %d/%d blocks (session id: %s)\n", len(diff.Nodes), len(info.Manifest.Nodes), sid)
+
 	return
 }
 

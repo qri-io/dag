@@ -68,23 +68,18 @@ func NewPush(lng ipld.NodeGetter, info *dag.Info, remote Remote, pinOnComplete b
 
 // Do executes the send, blocking until complete
 func (snd *Push) Do(ctx context.Context) (err error) {
-	// First Do sends a manifest to the remote node
-	// The remote returns the id of the process, and a diff of the manifest
-	// which describes which blocks we need to send
-	// We begin to send the blocks in parallel:
-	//   - We create a number of senders
-	//   - these senders listen on the blocks channel for which blocks
-	//     we need to send to the remote
-	//   - we create an error channel, sending over this channel will
-	//     end the whole process
-	//   - we set up a loop that listens for responses from the remote
-	//      - if the status is okay, update the progress
-	//      - if the status is error, send the error over the errCh
-	//      - if the status is retry, push the hash to the list of hashes to retry
-	//   - we set up a loop that listens for retries and sends the hash
-	//     to retry to the block channel, unless we have reached the maximum
-	//     amount of retries
-	//   - we set up a loop to push hashes onto the block channel
+	// how this process works:
+	// * Do sends a dag.Info to the remote node
+	// * The remote returns a session id for the, and manifest of blocks to send
+	//   this manifest may only ask for blocks it doesn't have by sending a smaller manifest
+	// * Do to sends blocks in parallel:
+	//   - create a number of senders
+	//   - each sender listens on the blocks channel for data to send to the remote
+	//   - listen for block responses from the remote, there are three possible
+	//     responses
+	//      - okay: update the progress
+	//      - error: send the error over the errCh
+	//      - retry: push the hash to the list of hashes to retry
 	//
 	// posible TODO (ramfox): it would be great if the fetch and send Do functions
 	// followed the same pattern. Specifically the go function that is used to listen for
@@ -93,21 +88,12 @@ func (snd *Push) Do(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	return snd.doActualPush(ctx)
+	return snd.do(ctx)
 }
 
-// // Push executes the send, given that we already have a session and diff
-// func (snd *Push) Push(sid string, mfst, diff *dag.Manifest) error {
-// 	snd.sid = sid
-// 	snd.mfst = mfst
-// 	snd.diff = diff
-// 	return snd.doActualPush()
-// }
-
-func (snd *Push) doActualPush(ctx context.Context) (err error) {
+func (snd *Push) do(ctx context.Context) (err error) {
 	snd.prog = dag.NewCompletion(snd.info.Manifest, snd.diff)
 	go snd.completionChanged()
-	// defer close(snd.progCh)
 
 	// response said we have nothing to send. all done
 	if len(snd.diff.Nodes) == 0 {
@@ -189,8 +175,9 @@ func (snd *Push) doActualPush(ctx context.Context) (err error) {
 	return <-errCh
 }
 
-// Completion returns a read-only channel of updates to completion
-func (snd *Push) Completion() <-chan dag.Completion {
+// Updates returns a read-only channel of Completion objects that depict
+// transfer state
+func (snd *Push) Updates() <-chan dag.Completion {
 	return snd.progCh
 }
 
@@ -239,6 +226,7 @@ func (s sender) start() {
 				}
 				s.responses <- s.remote.ReceiveBlock(s.sid, hash, node.RawData())
 			}()
+
 		case <-s.stopCh:
 			return
 		case <-s.ctx.Done():

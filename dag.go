@@ -18,7 +18,6 @@ import (
 	"sort"
 
 	"github.com/ugorji/go/codec"
-
 	"github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
 )

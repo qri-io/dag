@@ -27,20 +27,20 @@ func NewPull(cidStr string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Re
 	return f, nil
 }
 
-// NewPullWithManifest creates a pull when we already have a manifest
-func NewPullWithManifest(mfst *dag.Manifest, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (pull *Pull, err error) {
-	f, err := NewPull(mfst.RootCID().String(), lng, bapi, rem)
+// NewPullWithInfo creates a pull when we already have a dag.Info
+func NewPullWithInfo(info *dag.Info, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (pull *Pull, err error) {
+	f, err := NewPull(info.RootCID().String(), lng, bapi, rem)
 	if err != nil {
 		return nil, err
 	}
-	f.mfst = mfst
+	f.info = info
 	return f, nil
 }
 
 // Pull coordinates the transfer of missing blocks in a DAG from a remote to a block store
 type Pull struct {
 	path        string
-	mfst        *dag.Manifest
+	info        *dag.Info
 	diff        *dag.Manifest
 	remote      Remote
 	lng         ipld.NodeGetter
@@ -90,9 +90,9 @@ func (f *Pull) Do(ctx context.Context) (err error) {
 	//       timeout)
 	//   3) set up the process for telling the pullers which blocks to
 	//      request
-	if f.mfst == nil {
+	if f.info == nil {
 		// request a manifest from the remote if we don't have one
-		if f.mfst, err = f.remote.GetManifest(ctx, f.path); err != nil {
+		if f.info, err = f.remote.GetDagInfo(ctx, f.path); err != nil {
 			return
 		}
 	}
@@ -108,8 +108,8 @@ func (f *Pull) Do(ctx context.Context) (err error) {
 	// if err != nil {
 	// 	return
 	// }
-	f.diff = &dag.Manifest{Nodes: f.mfst.Nodes}
-	f.prog = dag.NewCompletion(f.mfst, f.diff)
+	f.diff = &dag.Manifest{Nodes: f.info.Manifest.Nodes}
+	f.prog = dag.NewCompletion(f.info.Manifest, f.diff)
 	go f.completionChanged()
 	// defer close(f.progCh)
 
@@ -165,7 +165,7 @@ func (f *Pull) Do(ctx context.Context) (err error) {
 					}
 
 					// this is the only place we should modify progress after creation
-					for i, hash := range f.mfst.Nodes {
+					for i, hash := range f.info.Manifest.Nodes {
 						if res.Hash == hash {
 							f.prog[i] = 100
 						}

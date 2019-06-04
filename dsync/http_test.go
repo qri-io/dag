@@ -17,6 +17,10 @@ import (
 )
 
 func TestSyncHTTP(t *testing.T) {
+	dpc := DefaultDagPrecheck
+	defer func() { DefaultDagPrecheck = dpc }()
+	DefaultDagPrecheck = func(context.Context, dag.Info) error { return nil }
+
 	ctx := context.Background()
 	_, a, err := makeAPI(ctx)
 	if err != nil {
@@ -35,19 +39,23 @@ func TestSyncHTTP(t *testing.T) {
 	}
 
 	aGetter := &dag.NodeGetter{Dag: a.Dag()}
-	mfst, err := dag.NewManifest(ctx, aGetter, path.Cid())
+	info, err := dag.NewInfo(ctx, aGetter, path.Cid())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	bGetter := &dag.NodeGetter{Dag: b.Dag()}
-	ts := New(bGetter, b.Block())
+	ts, err := New(bGetter, b.Block())
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	s := httptest.NewServer(HTTPRemoteHandler(ts))
 	defer s.Close()
 
 	cli := &HTTPClient{URL: s.URL}
 
-	push, err := NewPush(aGetter, mfst, cli, false)
+	push, err := NewPush(aGetter, info, cli, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,18 +73,18 @@ func TestSyncHTTP(t *testing.T) {
 
 // remote implements the Remote interface on a single receive session at a time
 type remote struct {
-	receive *Session
+	receive *session
 	lng     ipld.NodeGetter
 	bapi    coreiface.BlockAPI
 }
 
-func (r *remote) PushStart(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
+func (r *remote) PushStart(info *dag.Info) (sid string, diff *dag.Manifest, err error) {
 	ctx := context.Background()
-	r.receive, err = NewSession(ctx, r.lng, r.bapi, mfst, false)
+	r.receive, err = newSession(ctx, r.lng, r.bapi, info, false, false)
 	if err != nil {
 		return
 	}
-	sid = r.receive.sid
+	sid = r.receive.id
 	diff = r.receive.diff
 	return
 }

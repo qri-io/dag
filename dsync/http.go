@@ -11,16 +11,16 @@ import (
 	"github.com/qri-io/dag"
 )
 
-// HTTPClient implents the Remote interface via HTTP requests.
+// HTTPClient is the request side of doing dsync over HTTP
 type HTTPClient struct {
 	URL string
 }
 
 // NewReceiveSession initiates a session for pushing blocks to a remote.
 // It sends a Manifest to a remote source over HTTP
-func (rem *HTTPClient) NewReceiveSession(mfst *dag.Manifest, pinOnComplete bool) (sid string, diff *dag.Manifest, err error) {
+func (rem *HTTPClient) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid string, diff *dag.Manifest, err error) {
 	buf := &bytes.Buffer{}
-	if err = json.NewEncoder(buf).Encode(mfst); err != nil {
+	if err = json.NewEncoder(buf).Encode(info); err != nil {
 		return
 	}
 
@@ -49,11 +49,11 @@ func (rem *HTTPClient) NewReceiveSession(mfst *dag.Manifest, pinOnComplete bool)
 	err = json.NewDecoder(res.Body).Decode(diff)
 	// TODO (b5): this is really terrible to print here, but is *very* helpful info on the CLI
 	// we should pipe a completion channel up to the CLI & remove this
-	fmt.Printf("   sending %d/%d blocks (session id: %s)\n", len(diff.Nodes), len(mfst.Nodes), sid)
+	fmt.Printf("   sending %d/%d blocks (session id: %s)\n", len(diff.Nodes), len(info.Manifest.Nodes), sid)
 	return
 }
 
-// ReceiveBlock sends a block over HTTP to a remote source
+// ReceiveBlock asks a remote to receive a block over HTTP
 func (rem *HTTPClient) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 	url := fmt.Sprintf("%s?sid=%s&hash=%s", rem.URL, sid, hash)
 	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(data))
@@ -92,8 +92,8 @@ func (rem *HTTPClient) ReceiveBlock(sid, hash string, data []byte) ReceiveRespon
 	}
 }
 
-// GetManifest gets a manifest from a remote source over HTTP
-func (rem *HTTPClient) GetManifest(ctx context.Context, id string) (mfst *dag.Manifest, err error) {
+// GetDagInfo fetches a manifest from a remote source over HTTP
+func (rem *HTTPClient) GetDagInfo(ctx context.Context, id string) (info *dag.Info, err error) {
 	url := fmt.Sprintf("%s?manifest=%s", rem.URL, id)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -114,8 +114,8 @@ func (rem *HTTPClient) GetManifest(ctx context.Context, id string) (mfst *dag.Ma
 	}
 	defer res.Body.Close()
 
-	mfst = &dag.Manifest{}
-	err = json.NewDecoder(res.Body).Decode(mfst)
+	info = &dag.Info{}
+	err = json.NewDecoder(res.Body).Decode(info)
 	return
 }
 
@@ -144,22 +144,29 @@ func (rem *HTTPClient) GetBlock(ctx context.Context, id string) (data []byte, er
 	return ioutil.ReadAll(res.Body)
 }
 
-// HTTPRemoteHandler exposes a Dsync remote over HTTP, interlocks with methods exposed by HTTPClient
+// HTTPRemoteHandler exposes a Dsync remote over HTTP by exposing a HTTP handler
+// that interlocks with methods exposed by HTTPClient
 func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "POST":
-			mfst := &dag.Manifest{}
-			if err := json.NewDecoder(r.Body).Decode(mfst); err != nil {
+			info := &dag.Info{}
+			if err := json.NewDecoder(r.Body).Decode(info); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte(err.Error()))
 				return
 			}
 			r.Body.Close()
 
+			if info == nil {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte("body must be a json dag info object"))
+				return
+			}
+
 			pinOnComplete := r.FormValue("pin") == "true"
 
-			sid, diff, err := ds.NewReceiveSession(mfst, pinOnComplete)
+			sid, diff, err := ds.NewReceiveSession(info, pinOnComplete)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte(err.Error()))
@@ -196,7 +203,7 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte("either manifest or block query params are required"))
 			} else if mfstID != "" {
-				mfst, err := ds.GetManifest(r.Context(), mfstID)
+				mfst, err := ds.GetDagInfo(r.Context(), mfstID)
 				if err != nil {
 					w.WriteHeader(http.StatusInternalServerError)
 					w.Write([]byte(err.Error()))

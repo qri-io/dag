@@ -17,7 +17,7 @@ func NewTestDsync() *Dsync {
 	return &Dsync{
 		lng:            newTestNodeGetter(),
 		bapi:           newTestBlockAPI(),
-		sessionPool:    make(map[string]*Session),
+		sessionPool:    make(map[string]*session),
 		sessionCancels: make(map[string]context.CancelFunc),
 		sessionTTLDur:  time.Hour * 5,
 	}

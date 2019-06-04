@@ -8,20 +8,27 @@ import (
 )
 
 func TestPush(t *testing.T) {
+	dpc := DefaultDagPrecheck
+	defer func() { DefaultDagPrecheck = dpc }()
+	DefaultDagPrecheck = func(context.Context, dag.Info) error { return nil }
+
 	ctx := context.Background()
 	a, b := newLocalRemoteIPFSAPI(ctx, t)
 	id := addOneBlockDAG(a, t)
 
 	aGetter := &dag.NodeGetter{Dag: a.Dag()}
-	mfst, err := dag.NewManifest(ctx, aGetter, id)
+	info, err := dag.NewInfo(ctx, aGetter, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	bGetter := &dag.NodeGetter{Dag: b.Dag()}
-	rem := New(bGetter, b.Block())
+	rem, err := New(bGetter, b.Block())
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	send, err := NewPush(aGetter, mfst, rem, false)
+	send, err := NewPush(aGetter, info, rem, false)
 	if err != nil {
 		t.Fatal(err)
 	}

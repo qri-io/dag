@@ -13,37 +13,38 @@ import (
 
 // session tracks the state of a transfer
 type session struct {
-	sid    string
+	id     string
 	ctx    context.Context
 	lng    ipld.NodeGetter
 	bapi   coreiface.BlockAPI
 	pin    bool
-	mfst   *dag.Manifest
+	info   *dag.Info
 	diff   *dag.Manifest
 	prog   dag.Completion
 	progCh chan dag.Completion
 }
 
 // newSession creates a receive state machine
-func newSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAPI, mfst *dag.Manifest, pinOnComplete bool) (*session, error) {
+func newSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAPI, info *dag.Info, calcBlockDelta, pinOnComplete bool) (s *session, err error) {
 	// TODO (b5): ipfs api/v0/get/block doesn't allow checking for local blocks yet
 	// aren't working over ipfs api, so we can't do delta's quite yet. Just send the whole things back
-	diff := mfst
+	diff := info.Manifest
 
-	// diff, err := dag.Missing(ctx, lng, mfst)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	if calcBlockDelta {
+		if diff, err = dag.Missing(ctx, lng, info.Manifest); err != nil {
+			return nil, err
+		}
+	}
 
-	s := &session{
-		sid:    randStringBytesMask(10),
+	s = &session{
+		id:     randStringBytesMask(10),
 		ctx:    ctx,
 		lng:    lng,
 		bapi:   bapi,
-		mfst:   mfst,
+		info:   info,
 		diff:   diff,
 		pin:    pinOnComplete,
-		prog:   dag.NewCompletion(mfst, diff),
+		prog:   dag.NewCompletion(info.Manifest, diff),
 		progCh: make(chan dag.Completion),
 	}
 
@@ -74,7 +75,7 @@ func (s *session) ReceiveBlock(hash string, data io.Reader) ReceiveResponse {
 	}
 
 	// this should be the only place that modifies progress
-	for i, h := range s.mfst.Nodes {
+	for i, h := range s.info.Manifest.Nodes {
 		if hash == h {
 			s.prog[i] = 100
 		}

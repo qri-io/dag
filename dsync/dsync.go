@@ -255,11 +255,13 @@ func (ds *Dsync) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid stri
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(ds.sessionTTLDur))
 
 	if err = ds.preCheck(ctx, *info); err != nil {
+		cancel()
 		return
 	}
 
 	if pinOnComplete && ds.pin == nil {
 		err = fmt.Errorf("remote doesn't support pinning")
+		cancel()
 		return
 	}
 

@@ -17,10 +17,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/ugorji/go/codec"
-
 	"github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
+	"github.com/ugorji/go/codec"
 )
 
 // Node is a subset of the ipld ipld.Node interface, defining just the necessary

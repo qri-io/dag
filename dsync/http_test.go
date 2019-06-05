@@ -12,11 +12,15 @@ import (
 
 	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
-	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	ipld "github.com/ipfs/go-ipld-format"
+	coreiface "github.com/ipfs/interface-go-ipfs-core"
 )
 
 func TestSyncHTTP(t *testing.T) {
+	dpc := DefaultDagPrecheck
+	defer func() { DefaultDagPrecheck = dpc }()
+	DefaultDagPrecheck = func(context.Context, dag.Info) error { return nil }
+
 	ctx := context.Background()
 	_, a, err := makeAPI(ctx)
 	if err != nil {
@@ -28,31 +32,35 @@ func TestSyncHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f := files.NewReaderFile(ioutil.NopCloser(strings.NewReader("y"+strings.Repeat("o", 350))))
+	f := files.NewReaderFile(ioutil.NopCloser(strings.NewReader("y" + strings.Repeat("o", 350))))
 	path, err := a.Unixfs().Add(ctx, f)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	aGetter := &dag.NodeGetter{Dag: a.Dag()}
-	mfst, err := dag.NewManifest(ctx, aGetter, path.Cid())
+	info, err := dag.NewInfo(ctx, aGetter, path.Cid())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	bGetter := &dag.NodeGetter{Dag: b.Dag()}
-	rs := NewReceivers(ctx, bGetter, b.Block())
-	s := httptest.NewServer(rs.HTTPHandler())
-	defer s.Close()
-
-	rem := &HTTPRemote{URL: s.URL}
-
-	send, err := NewSend(ctx, aGetter, mfst, rem)
+	ts, err := New(bGetter, b.Block())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := send.Do(); err != nil {
+	s := httptest.NewServer(HTTPRemoteHandler(ts))
+	defer s.Close()
+
+	cli := &HTTPClient{URL: s.URL}
+
+	push, err := NewPush(aGetter, info, cli, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := push.Do(ctx); err != nil {
 		t.Error(err)
 	}
 
@@ -65,27 +73,27 @@ func TestSyncHTTP(t *testing.T) {
 
 // remote implements the Remote interface on a single receive session at a time
 type remote struct {
-	receive *Receive
+	receive *session
 	lng     ipld.NodeGetter
 	bapi    coreiface.BlockAPI
 }
 
-func (r *remote) ReqSend(mfst *dag.Manifest) (sid string, diff *dag.Manifest, err error) {
+func (r *remote) PushStart(info *dag.Info) (sid string, diff *dag.Manifest, err error) {
 	ctx := context.Background()
-	r.receive, err = NewReceive(ctx, r.lng, r.bapi, mfst)
+	r.receive, err = newSession(ctx, r.lng, r.bapi, info, false, false)
 	if err != nil {
 		return
 	}
-	sid = r.receive.sid
+	sid = r.receive.id
 	diff = r.receive.diff
 	return
 }
 
-func (r *remote) PutBlock(sid, hash string, data []byte) Response {
+func (r *remote) PushBlock(sid, hash string, data []byte) ReceiveResponse {
 	return r.receive.ReceiveBlock(hash, bytes.NewReader(data))
 }
 
-func (r *remote) ReqManifest(ctx context.Context, hash string) (mfst *dag.Manifest, err error) {
+func (r *remote) PullManifest(ctx context.Context, hash string) (mfst *dag.Manifest, err error) {
 	id, err := cid.Parse(hash)
 	if err != nil {
 		return nil, err

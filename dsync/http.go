@@ -16,6 +16,10 @@ type HTTPClient struct {
 	URL string
 }
 
+// HTTPClient exists to satisfy the DaySyncable interface on the client side
+// of a transfer
+var _ DagSyncable = (*HTTPClient)(nil)
+
 // NewReceiveSession initiates a session for pushing blocks to a remote.
 // It sends a Manifest to a remote source over HTTP
 func (rem *HTTPClient) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid string, diff *dag.Manifest, err error) {

@@ -12,7 +12,7 @@ import (
 )
 
 // NewPull sets up fetching a DAG at an id from a remote
-func NewPull(cidStr string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (pull *Pull, err error) {
+func NewPull(cidStr string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem DagSyncable) (pull *Pull, err error) {
 	f := &Pull{
 		path:        cidStr,
 		lng:         lng,
@@ -28,7 +28,7 @@ func NewPull(cidStr string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Re
 }
 
 // NewPullWithInfo creates a pull when we already have a dag.Info
-func NewPullWithInfo(info *dag.Info, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Remote) (pull *Pull, err error) {
+func NewPullWithInfo(info *dag.Info, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem DagSyncable) (pull *Pull, err error) {
 	f, err := NewPull(info.RootCID().String(), lng, bapi, rem)
 	if err != nil {
 		return nil, err
@@ -42,7 +42,7 @@ type Pull struct {
 	path        string
 	info        *dag.Info
 	diff        *dag.Manifest
-	remote      Remote
+	remote      DagSyncable
 	lng         ipld.NodeGetter
 	bapi        coreiface.BlockAPI
 	parallelism int
@@ -66,7 +66,7 @@ func (f *Pull) Do(ctx context.Context) (err error) {
 	// * determines the progress already made by checking for local blocks
 	//   from the manifest
 	// * begin to pull the blocks in parallel:
-	// 		- create a number of pullers
+	//    - create a number of pullers
 	//    - each puller listens for incoming ids on the request channel
 	//      they request the blocks of these hash from the remote & send the
 	//      responses to the response channel
@@ -177,10 +177,10 @@ func (f *Pull) completionChanged() {
 	f.progCh <- f.prog
 }
 
-// puller is a parallelizable, stateless struct that pulles blocks
+// puller is a parallelizable, stateless struct that pulls blocks
 type puller struct {
 	id     int
-	remote Remote
+	remote DagSyncable
 	ctx    context.Context
 	reqCh  <-chan string
 	resCh  chan blockResponse

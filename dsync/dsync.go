@@ -41,9 +41,13 @@ const (
 	maxRetries = 25
 )
 
-// Remote is a source that can be synced to & from. dsync requests automate
+// DagSyncable is a source that can be synced to & from. dsync requests automate
 // calls to this interface with higher-order functions like Push and Pull
-type Remote interface {
+//
+// In order to coordinate between a local and a remote, you need something that
+// will satisfy the DagSyncable interface on both ends of the wire, one to act
+// as the requester and the other to act as the remote
+type DagSyncable interface {
 	// NewReceiveSession requests a new send session from the remote, which will return a
 	// delta manifest of blocks the remote needs and a session id that must
 	// be sent with each block
@@ -115,7 +119,7 @@ type Dsync struct {
 }
 
 // compile-time assertion that Dsync satisfies the remote interface
-var _ Remote = (*Dsync)(nil)
+var _ DagSyncable = (*Dsync)(nil)
 
 // Config encapsulates optional Dsync configuration
 type Config struct {

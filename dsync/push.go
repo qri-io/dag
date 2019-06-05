@@ -13,7 +13,7 @@ import (
 type ReceiveResponseStatus int
 
 const (
-	// StatusErrored igondicates the request failed and cannot be retried
+	// StatusErrored indicates the request failed and cannot be retried
 	StatusErrored ReceiveResponseStatus = -1
 	// StatusOk indicates the request completed successfully
 	StatusOk ReceiveResponseStatus = 0
@@ -35,7 +35,7 @@ type Push struct {
 	info          *dag.Info       // info we're sending
 	diff          *dag.Manifest   // returned difference
 	lng           ipld.NodeGetter // local NodeGetter (Block Getter)
-	remote        Remote          // place we're sending to
+	remote        DagSyncable     // place we're sending to
 	parallelism   int             // number of "tracks" for sending along
 	prog          dag.Completion  // progress state
 	progCh        chan dag.Completion
@@ -46,7 +46,7 @@ type Push struct {
 
 // NewPush initiates a send for a DAG at an id from a local to a remote.
 // Push is initiated by the local node
-func NewPush(lng ipld.NodeGetter, info *dag.Info, remote Remote, pinOnComplete bool) (*Push, error) {
+func NewPush(lng ipld.NodeGetter, info *dag.Info, remote DagSyncable, pinOnComplete bool) (*Push, error) {
 	parallelism := defaultPushParallelism
 	if len(info.Manifest.Nodes) < parallelism {
 		parallelism = len(info.Manifest.Nodes)
@@ -191,7 +191,7 @@ type sender struct {
 	sid       string
 	ctx       context.Context
 	lng       ipld.NodeGetter
-	remote    Remote
+	remote    DagSyncable
 	blocksCh  chan string
 	responses chan ReceiveResponse
 	stopCh    chan bool

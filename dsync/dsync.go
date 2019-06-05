@@ -26,6 +26,7 @@ import (
 	ipld "github.com/ipfs/go-ipld-format"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	"github.com/ipfs/interface-go-ipfs-core/path"
+	host "github.com/libp2p/go-libp2p-host"
 	"github.com/qri-io/dag"
 )
 
@@ -109,7 +110,10 @@ type Dsync struct {
 	// dagFinalCheck is called before finalizing a receive session
 	finalCheck DagFinalCheck
 	// http server accepting dsync requests
-	httpServer       *http.Server
+	httpServer *http.Server
+	// host for acting as a p2p remote
+	p2pHost host.Host
+
 	requireAllBlocks bool
 	// inbound transfers in progress, will be nil if not acting as a remote
 	sessionLock    sync.Mutex
@@ -128,6 +132,9 @@ type Config struct {
 	// provide a listening addres to have Dsync spin up an HTTP server when
 	// StartRemote(ctx) is called
 	HTTPRemoteAddress string
+	// to send & push over libp2p connections, provide a libp2p host
+	Libp2pHost host.Host
+
 	// PinAPI is required for remotes to accept
 	PinAPI coreiface.PinAPI
 	// User-Supplied PreCheck function for a remote accepting DAGs

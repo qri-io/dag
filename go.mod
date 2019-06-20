@@ -21,9 +21,10 @@ require (
 	github.com/libp2p/go-libp2p-peer v0.1.1
 	github.com/libp2p/go-libp2p-peerstore v0.0.6
 	github.com/libp2p/go-libp2p-protocol v0.0.1
+	github.com/multiformats/go-multiaddr v0.0.4
 	github.com/multiformats/go-multicodec v0.1.6
 	github.com/multiformats/go-multihash v0.0.5
-	github.com/ugorji/go v1.1.4
-	github.com/whyrusleeping/yamux v1.2.0 // indirect
-	google.golang.org/appengine v1.4.0 // indirect
+	github.com/qri-io/qri v0.8.1 // indirect
+	github.com/ugorji/go v1.1.5-pre
+	github.com/ugorji/go/codec v1.1.5-pre
 )

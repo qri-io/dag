@@ -34,33 +34,15 @@ var (
 	mtGetBlock = p2putil.MsgType("get_block")
 )
 
-// p2pDsync implements dsync as a libp2p protocol handler
-type p2pDsync struct {
+type p2pClient struct {
 	remotePeerID peer.ID
-	host         host.Host
-	dsync        *Dsync
-	handlers     map[p2putil.MsgType]p2putil.HandlerFunc
+	*p2pHandler
 }
 
-// newp2pDsync creates a p2p remote stream handler from a dsync.Remote
-func newp2pDsync(dsync *Dsync, host host.Host) *p2pDsync {
-	c := &p2pDsync{dsync: dsync}
-	c.handlers = map[p2putil.MsgType]p2putil.HandlerFunc{
-		mtNewReceive: c.HandleReqSend,
-		MtPutBlock:   c.HandleReceiveBlock,
-		mtGetDagInfo: c.HandleReqManifest,
-		mtGetBlock:   c.HandleGetBlock,
-	}
-	return c
-}
+// assert at compile time that p2pClient implements DagSyncable
+var _ DagSyncable = (*p2pClient)(nil)
 
-// assert at compile time that p2pDsync implements DagSyncable
-var _ DagSyncable = (*p2pDsync)(nil)
-
-// NewReceiveSession requests a new push session from the remote, which will return a
-// delta manifest of blocks the remote needs and a session id that must
-// be sent with each block
-func (c *p2pDsync) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid string, diff *dag.Manifest, err error) {
+func (c *p2pClient) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid string, diff *dag.Manifest, err error) {
 	var data []byte
 	if data, err = info.MarshalCBOR(); err != nil {
 		return
@@ -68,6 +50,7 @@ func (c *p2pDsync) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid st
 
 	msg := p2putil.NewMessage(c.host.ID(), mtNewReceive, data).WithHeaders(
 		"pin", fmt.Sprintf("%t", pinOnComplete),
+		"phase", "request",
 	)
 
 	res, err := c.sendMessage(context.Background(), msg, c.remotePeerID)
@@ -81,29 +64,37 @@ func (c *p2pDsync) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid st
 }
 
 // ReceiveBlock places a block on the remote
-func (c *p2pDsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
+func (c *p2pClient) ReceiveBlock(sid, cidStr string, data []byte) ReceiveResponse {
 	msg := p2putil.NewMessage(c.host.ID(), mtReceiveBlock, data).WithHeaders(
 		"sid", sid,
-		"hash", hash,
+		"cid", cidStr,
+		"phase", "request",
 	)
 
 	res, err := c.sendMessage(context.Background(), msg, c.remotePeerID)
 	if err != nil {
 		return ReceiveResponse{
-			Hash:   hash,
+			Hash:   cidStr,
 			Status: StatusErrored,
 			Err:    fmt.Errorf("remote error: %s", err.Error()),
 		}
 	}
 
-	rr := ReceiveResponse{}
-	err = codec.NewDecoder(bytes.NewReader(res.Body), &codec.CborHandle{}).Decode(&rr)
-	if err != nil {
-		return ReceiveResponse{
-			Hash:   hash,
-			Status: StatusErrored,
-			Err:    fmt.Errorf("decoding response: %s", err.Error),
-		}
+	rr := ReceiveResponse{
+		Hash: res.Header("cid"),
+	}
+
+	if e := res.Header("error"); e != "" {
+		rr.Err = fmt.Errorf("%s", e)
+	}
+
+	switch res.Header("status") {
+	case "ok":
+		rr.Status = StatusOk
+	case "retry":
+		rr.Status = StatusRetry
+	default:
+		rr.Status = StatusErrored
 	}
 
 	return rr
@@ -111,9 +102,9 @@ func (c *p2pDsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 
 // GetDagInfo asks the remote for info specified by a the root identifier
 // string of a DAG
-func (c *p2pDsync) GetDagInfo(ctx context.Context, cidStr string) (info *dag.Info, err error) {
+func (c *p2pClient) GetDagInfo(ctx context.Context, cidStr string) (info *dag.Info, err error) {
 	msg := p2putil.NewMessage(c.host.ID(), mtGetDagInfo, nil).WithHeaders(
-		"manifest", cidStr,
+		"cid", cidStr,
 	)
 
 	res, err := c.sendMessage(ctx, msg, c.remotePeerID)
@@ -127,9 +118,9 @@ func (c *p2pDsync) GetDagInfo(ctx context.Context, cidStr string) (info *dag.Inf
 }
 
 // GetBlock gets a block of data from the remote
-func (c *p2pDsync) GetBlock(ctx context.Context, cidStr string) (rawdata []byte, err error) {
+func (c *p2pClient) GetBlock(ctx context.Context, cidStr string) (rawdata []byte, err error) {
 	msg := p2putil.NewMessage(c.host.ID(), mtGetBlock, nil).WithHeaders(
-		"block", cidStr,
+		"cid", cidStr,
 	)
 	res, err := c.sendMessage(ctx, msg, c.remotePeerID)
 	if err != nil {
@@ -138,18 +129,44 @@ func (c *p2pDsync) GetBlock(ctx context.Context, cidStr string) (rawdata []byte,
 	return res.Body, nil
 }
 
-// sendMessage opens a stream & sends a message to a peer id
-func (c *p2pDsync) sendMessage(ctx context.Context, msg p2putil.Message, pid peer.ID) (p2putil.Message, error) {
+// p2pHandler implements dsync as a libp2p protocol handler
+type p2pHandler struct {
+	dsync    *Dsync
+	host     host.Host
+	handlers map[p2putil.MsgType]p2putil.HandlerFunc
+}
 
+// assert at compile time that p2pHandler implements DagSyncable
+// var _ DagSyncable = (*p2pHandler)(nil)
+
+// newp2pHandler creates a p2p remote stream handler from a dsync.Remote
+func newp2pHandler(dsync *Dsync, host host.Host) *p2pHandler {
+	c := &p2pHandler{dsync: dsync, host: host}
+	c.handlers = map[p2putil.MsgType]p2putil.HandlerFunc{
+		mtNewReceive:   c.HandleNewReceive,
+		mtReceiveBlock: c.HandleReceiveBlock,
+		mtGetDagInfo:   c.HandleReqManifest,
+		mtGetBlock:     c.HandleGetBlock,
+	}
+	return c
+}
+
+// LibP2PStreamHandler provides remote access over p2p
+func (c *p2pHandler) LibP2PStreamHandler(s net.Stream) {
+	c.handleStream(p2putil.WrapStream(s), nil)
+}
+
+// sendMessage opens a stream & sends a message to a peer id
+func (c *p2pHandler) sendMessage(ctx context.Context, msg p2putil.Message, pid peer.ID) (p2putil.Message, error) {
 	s, err := c.host.NewStream(ctx, pid, DsyncProtocolID)
 	if err != nil {
 		return p2putil.Message{}, fmt.Errorf("error opening stream: %s", err.Error())
 	}
 	defer s.Close()
 
-	// 	// now that we have a confirmed working connection
-	// 	// tag this peer as supporting the qri protocol in the connection manager
-	// 	// rem.host.ConnManager().TagPeer(pid, dsyncSupportKey, dsyncSupportValue)
+	// now that we have a confirmed working connection
+	// tag this peer as supporting the qri protocol in the connection manager
+	// rem.host.ConnManager().TagPeer(pid, dsyncSupportKey, dsyncSupportValue)
 
 	ws := p2putil.WrapStream(s)
 	replies := make(chan p2putil.Message)
@@ -162,16 +179,11 @@ func (c *p2pDsync) sendMessage(ctx context.Context, msg p2putil.Message, pid pee
 	return reply, nil
 }
 
-// LibP2PStreamHandler provides remote access over p2p
-func (c *p2pDsync) LibP2PStreamHandler(s net.Stream) {
-	c.handleStream(p2putil.WrapStream(s), nil)
-}
-
 // handleStream is a loop which receives and handles messages
 // When Message.HangUp is true, it exits. This will close the stream
 // on one of the sides. The other side's receiveMessage() will error
 // with EOF, thus also breaking out from the loop.
-func (c *p2pDsync) handleStream(ws *p2putil.WrappedStream, replies chan p2putil.Message) {
+func (c *p2pHandler) handleStream(ws *p2putil.WrappedStream, replies chan p2putil.Message) {
 	for {
 		// Loop forever, receiving messages until the other end hangs up
 		// or something goes wrong
@@ -185,9 +197,13 @@ func (c *p2pDsync) handleStream(ws *p2putil.WrappedStream, replies chan p2putil.
 			break
 		}
 
+		if replies != nil {
+			go func() { replies <- msg }()
+		}
+
 		handler, ok := c.handlers[msg.Type]
 		if !ok {
-			// log.Infof("peer %s sent unrecognized message type '%s', hanging up", n.ID, msg.Type)
+			// log.Errorf("peer %s sent unrecognized message type '%s', hanging up", n.ID, msg.Type)
 			break
 		}
 
@@ -199,65 +215,121 @@ func (c *p2pDsync) handleStream(ws *p2putil.WrappedStream, replies chan p2putil.
 	ws.Close()
 }
 
-// HandleReqSend requests a new send session from the remote, which will return
+// HandleNewReceive requests a new send session from the remote, which will return
 // a delta manifest of blocks the remote needs and a session id that must
 // be sent with each block
-func (c *p2pDsync) HandleReqSend(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
-	info, err := dag.UnmarshalCBORDagInfo(msg.Body)
-	if err != nil {
-		return true
-	}
+func (c *p2pHandler) HandleNewReceive(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
+	if msg.Header("phase") == "request" {
+		info, err := dag.UnmarshalCBORDagInfo(msg.Body)
+		if err != nil {
+			return true
+		}
 
-	pinOnComplete := msg.Header("pin") == "true"
-	sid, diff, err := c.dsync.NewReceiveSession(info, pinOnComplete)
-	if err != nil {
-		// TODO (b5) - send error response
-		// msg =
-	}
+		pinOnComplete := msg.Header("pin") == "true"
+		sid, diff, err := c.dsync.NewReceiveSession(info, pinOnComplete)
+		if err != nil {
+			// TODO (b5) - send error response
+			// msg =
+			fmt.Printf("error creating new receive: %s\n", err.Error())
+			return true
+		}
 
-	// msg := msg.WithHeaders(
-	// 	"phase" : "response",
-	// 	"sid" : sid,
-	// ).Update()
-	// sid, diff, err := c.remote.ReqSend(mfst)
-	// if err != nil {
-	// 	return true
-	// }
+		enc, err := diff.MarshalCBOR()
+		if err != nil {
+			// TODO (b5) - send error response
+			// msg =
+			fmt.Printf("error marshaling cbor: %s\n", err.Error())
+			return true
+		}
+
+		res := msg.WithHeaders(
+			"phase", "response",
+			"sid", sid,
+		).Update(enc)
+
+		if err := ws.SendMessage(res); err != nil {
+			return true
+		}
+	}
 
 	// w.Header().Set("sid", sid)
 	// json.NewEncoder(w).Encode(diff)
 	return false
 }
 
-// MtPutBlock identifies the "put_block" message type
-var MtPutBlock = p2putil.MsgType("put_block")
-
 // HandleReceiveBlock places a block on the remote
-func (c *p2pDsync) HandleReceiveBlock(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
-	sid := msg.Headers["sid"]
-	hash := msg.Headers["hash"]
-	res := c.dsync.ReceiveBlock(sid, hash, msg.Body)
+func (c *p2pHandler) HandleReceiveBlock(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
+	if msg.Header("phase") == "request" {
+		sid := msg.Headers["sid"]
+		cidStr := msg.Headers["cid"]
+		rr := c.dsync.ReceiveBlock(sid, cidStr, msg.Body)
 
-	if res.Status == StatusErrored {
-		// w.WriteHeader(http.StatusInternalServerError)
-		// w.Write([]byte(res.Err.Error()))
-	} else if res.Status == StatusRetry {
-		// w.WriteHeader(http.StatusBadRequest)
-		// w.Write([]byte(res.Err.Error()))
-	} else {
-		// w.WriteHeader(http.StatusOK)
+		var status, err string
+		switch rr.Status {
+		case StatusErrored:
+			status = "errored"
+		case StatusOk:
+			status = "ok"
+		case StatusRetry:
+			status = "retry"
+		}
+
+		if rr.Err != nil {
+			err = rr.Err.Error()
+		}
+
+		res := msg.WithHeaders(
+			"phase", "response",
+			"cid", cidStr,
+			"status", status,
+			"error", err,
+		)
+
+		if err := ws.SendMessage(res); err != nil {
+			return true
+		}
 	}
 
 	return false
 }
 
 // HandleReqManifest asks the remote for a manifest specified by the root ID of a DAG
-func (c *p2pDsync) HandleReqManifest(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
-	// rh.remote.ReqManifest()
+func (c *p2pHandler) HandleReqManifest(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
+	cidStr := msg.Header("cid")
+	res := msg.WithHeaders("phase", "response")
+
+	// TODO (b5): pass a context into here
+	if di, err := c.dsync.GetDagInfo(context.Background(), cidStr); err != nil {
+		res = res.WithHeaders("error", err.Error())
+	} else {
+		data, err := di.MarshalCBOR()
+		if err != nil {
+			return
+		}
+		res = res.Update(data)
+	}
+
+	if err := ws.SendMessage(res); err != nil {
+		return true
+	}
 	return false
 }
 
 // HandleGetBlock gets a block from the remote
-func (c *p2pDsync) HandleGetBlock(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
+func (c *p2pHandler) HandleGetBlock(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
+	cidStr := msg.Header("cid")
+	res := msg.WithHeaders("phase", "response")
+
+	// TODO (b5) - plumb a context in here
+	data, err := c.dsync.GetBlock(context.Background(), cidStr)
+	if err != nil {
+		res = res.WithHeaders("error", err.Error())
+	} else {
+		res = res.Update(data)
+	}
+
+	if err := ws.SendMessage(res); err != nil {
+		return true
+	}
 	return false
 }

@@ -62,6 +62,11 @@ func (ws *WrappedStream) SendMessage(msg Message) error {
 	return err
 }
 
+// Stream exposes the underlying libp2p net.Stream
+func (ws *WrappedStream) Stream() net.Stream {
+	return ws.stream
+}
+
 // Close closes the stream connection
 func (ws *WrappedStream) Close() error {
 	return ws.stream.Close()

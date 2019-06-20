@@ -42,6 +42,7 @@ func (m Message) Update(body []byte) Message {
 	return Message{
 		Type:      m.Type,
 		ID:        m.ID,
+		Headers:   m.Headers,
 		Created:   m.Created,
 		Deadline:  m.Deadline,
 		Initiator: m.Initiator,

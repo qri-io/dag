@@ -21,12 +21,14 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"strings"
 
 	"github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	host "github.com/libp2p/go-libp2p-host"
+	peer "github.com/libp2p/go-libp2p-peer"
 	"github.com/qri-io/dag"
 )
 
@@ -49,9 +51,9 @@ const (
 // will satisfy the DagSyncable interface on both ends of the wire, one to act
 // as the requester and the other to act as the remote
 type DagSyncable interface {
-	// NewReceiveSession requests a new send session from the remote, which will return a
-	// delta manifest of blocks the remote needs and a session id that must
-	// be sent with each block
+	// NewReceiveSession starts a push session from local to a remote.
+	// The remote will return a delta manifest of blocks the remote needs
+	// and a session id that must be sent with each block
 	NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid string, diff *dag.Manifest, err error)
 	// ReceiveBlock places a block on the remote
 	ReceiveBlock(sid, hash string, data []byte) ReceiveResponse
@@ -105,16 +107,20 @@ type Dsync struct {
 	// api for pinning blocks
 	pin coreiface.PinAPI
 
+	// http server accepting dsync requests
+	httpServer *http.Server
+	// struct for accepting p2p dsync requests
+	p2pHandler *p2pHandler
+
 	// preCheck is called before creating a receive session
 	preCheck DagPreCheck
 	// dagFinalCheck is called before finalizing a receive session
 	finalCheck DagFinalCheck
-	// http server accepting dsync requests
-	httpServer *http.Server
-	// host for acting as a p2p remote
-	p2pHost host.Host
 
+	// requireAllBlocks forces pushes to send *all* blocks,
+	// skipping manifest diffing
 	requireAllBlocks bool
+
 	// inbound transfers in progress, will be nil if not acting as a remote
 	sessionLock    sync.Mutex
 	sessionPool    map[string]*session
@@ -157,12 +163,18 @@ func (cfg *Config) Validate() error {
 	return nil
 }
 
+// OptLibp2pHost is a convenience function for  supplying a libp2p.Host to
+// dsync.New
+func OptLibp2pHost(host host.Host) func(cfg *Config) {
+	return func(cfg *Config) { cfg.Libp2pHost = host }
+}
+
 // New creates a local Dsync service. By default Dsync can push and pull to
 // remotes. It can be configured to act as a remote for other Dsync instances.
 //
-// Its crucial that the NodeGetter passed to New be a offline-only.
-// if using IPFS this package defines a helper function: NewLocalNodeGetter
-// to get an offline-only node getter
+// Its crucial that the NodeGetter passed to New be an offline-only getter.
+// if using IPFS, this package defines a helper function: NewLocalNodeGetter
+// to get an offline-only node getter from an ipfs CoreAPI interface
 func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func(cfg *Config)) (*Dsync, error) {
 	cfg := &Config{
 		PreCheck:   DefaultDagPrecheck,
@@ -202,6 +214,10 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 		}
 	}
 
+	if cfg.Libp2pHost != nil {
+		ds.p2pHandler = newp2pHandler(ds, cfg.Libp2pHost)
+	}
+
 	return ds, nil
 }
 
@@ -210,7 +226,7 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 // StartRemote returns immediately. Stop remote service by cancelling
 // the passed-in context.
 func (ds *Dsync) StartRemote(ctx context.Context) error {
-	if ds.httpServer == nil {
+	if ds.httpServer == nil && ds.p2pHandler == nil {
 		return fmt.Errorf("dsync is not configured as a remote")
 	}
 
@@ -225,7 +241,27 @@ func (ds *Dsync) StartRemote(ctx context.Context) error {
 		go ds.httpServer.ListenAndServe()
 	}
 
+	if ds.p2pHandler != nil {
+		ds.p2pHandler.host.SetStreamHandler(DsyncProtocolID, ds.p2pHandler.LibP2PStreamHandler)
+	}
+
 	return nil
+}
+
+func (ds *Dsync) syncableRemote(remoteAddr string) (rem DagSyncable, err error) {
+	// if a valid base58 peerID is passed, we're doing a p2p dsync
+	if id, err := peer.IDB58Decode(remoteAddr); err == nil {
+		if ds.p2pHandler == nil {
+			return nil, fmt.Errorf("no p2p host provided to perform p2p dsync")
+		}
+		rem = &p2pClient{remotePeerID: id, p2pHandler: ds.p2pHandler }
+	} else if strings.HasPrefix(remoteAddr, "http") {
+		rem = &HTTPClient{URL: remoteAddr}
+	} else {
+		return nil, fmt.Errorf("unrecognized push address string: %s", remoteAddr)
+	}
+
+	return rem, nil
 }
 
 // NewPush creates a push from Dsync to a remote address
@@ -246,14 +282,20 @@ func (ds *Dsync) NewPush(cidStr, remoteAddr string, pinOnComplete bool) (*Push, 
 // NewPushInfo creates a push from an existing dag.Info. All blocks in the
 // info manifest must be accessible from the local Dsync block repository
 func (ds *Dsync) NewPushInfo(info *dag.Info, remoteAddr string, pinOnComplete bool) (*Push, error) {
-	rem := &HTTPClient{URL: remoteAddr}
+	rem, err := ds.syncableRemote(remoteAddr)
+	if err != nil {
+		return nil, err
+	}
 	return NewPush(ds.lng, info, rem, pinOnComplete)
 }
 
 // NewPull creates a pull. A pull fetches an entire DAG from a remote, placing
 // it in the local block store
 func (ds *Dsync) NewPull(cidStr, remoteAddr string) (*Pull, error) {
-	rem := &HTTPClient{URL: remoteAddr}
+	rem, err := ds.syncableRemote(remoteAddr)
+	if err != nil {
+		return nil, err
+	}
 	return NewPull(cidStr, ds.lng, ds.bapi, rem)
 }
 
@@ -300,7 +342,7 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 		return ReceiveResponse{
 			Hash:   hash,
 			Status: StatusErrored,
-			Err:    fmt.Errorf("sid not found"),
+			Err:    fmt.Errorf("sid '%s' not found", sid),
 		}
 	}
 

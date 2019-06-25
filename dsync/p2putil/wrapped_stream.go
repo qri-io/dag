@@ -3,7 +3,7 @@ package p2putil
 import (
 	"bufio"
 
-	net "github.com/libp2p/go-libp2p-net"
+	libp2p "github.com/libp2p/go-libp2p-core"
 	multicodec "github.com/multiformats/go-multicodec"
 	json "github.com/multiformats/go-multicodec/json"
 )
@@ -15,7 +15,7 @@ type HandlerFunc func(ws *WrappedStream, msg Message) (hangup bool)
 // write/read from a stream, so we can just carry the encoders
 // and bufios with us
 type WrappedStream struct {
-	stream net.Stream
+	stream libp2p.Stream
 	enc    multicodec.Encoder
 	dec    multicodec.Decoder
 	w      *bufio.Writer
@@ -28,7 +28,7 @@ type WrappedStream struct {
 // Finally, we should wrap.w.Flush() to actually send the data. Handling
 // incoming data works similarly with wrap.r.Read() for raw-reading and
 // wrap.dec.Decode() to decode.
-func WrapStream(s net.Stream) *WrappedStream {
+func WrapStream(s libp2p.Stream) *WrappedStream {
 	reader := bufio.NewReader(s)
 	writer := bufio.NewWriter(s)
 	// This is where we pick our specific multicodec. In order to change the
@@ -62,8 +62,8 @@ func (ws *WrappedStream) SendMessage(msg Message) error {
 	return err
 }
 
-// Stream exposes the underlying libp2p net.Stream
-func (ws *WrappedStream) Stream() net.Stream {
+// Stream exposes the underlying libp2p libp2p.Stream
+func (ws *WrappedStream) Stream() libp2p.Stream {
 	return ws.stream
 }
 

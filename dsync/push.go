@@ -12,6 +12,19 @@ import (
 // ReceiveResponseStatus defines types of results for a request
 type ReceiveResponseStatus int
 
+// String returns a string representation of the status
+func (s ReceiveResponseStatus) String() string {
+	switch s {
+	case StatusErrored:
+		return "errored"
+	case StatusOk:
+		return "ok"
+	case StatusRetry:
+		return "retry"
+	}
+	return "unknown"
+}
+
 const (
 	// StatusErrored indicates the request failed and cannot be retried
 	StatusErrored ReceiveResponseStatus = -1
@@ -88,6 +101,7 @@ func (snd *Push) Do(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	log.Debugf("push has receive session: %s", snd.sid)
 	return snd.do(ctx)
 }
 
@@ -124,6 +138,7 @@ func (snd *Push) do(ctx context.Context) (err error) {
 		// never block, so all responses are handled in their own goroutine
 		for res := range snd.responses {
 			go func(r ReceiveResponse) {
+				log.Debugf("push block response: %s. cid: %s", res.Status, res.Hash)
 				switch r.Status {
 				case StatusOk:
 					// this is the only place we should modify progress after creation

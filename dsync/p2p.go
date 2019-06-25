@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	host "github.com/libp2p/go-libp2p-host"
-	net "github.com/libp2p/go-libp2p-net"
+	host "github.com/libp2p/go-libp2p-core/host"
+	libp2p "github.com/libp2p/go-libp2p-core"
 	peer "github.com/libp2p/go-libp2p-peer"
 	protocol "github.com/libp2p/go-libp2p-protocol"
 	"github.com/qri-io/dag"
@@ -53,6 +53,7 @@ func (c *p2pClient) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid s
 		"phase", "request",
 	)
 
+	log.Debugf("new push session msg to %s", c.remotePeerID)
 	res, err := c.sendMessage(context.Background(), msg, c.remotePeerID)
 	if err != nil {
 		return
@@ -60,6 +61,7 @@ func (c *p2pClient) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid s
 
 	sid = res.Header("sid")
 	diff, err = dag.UnmarshalCBORManifest(res.Body)
+	log.Debugf("received pin pessage from %s", c.remotePeerID)
 	return sid, diff, err
 }
 
@@ -152,7 +154,7 @@ func newp2pHandler(dsync *Dsync, host host.Host) *p2pHandler {
 }
 
 // LibP2PStreamHandler provides remote access over p2p
-func (c *p2pHandler) LibP2PStreamHandler(s net.Stream) {
+func (c *p2pHandler) LibP2PStreamHandler(s libp2p.Stream) {
 	c.handleStream(p2putil.WrapStream(s), nil)
 }
 
@@ -212,6 +214,7 @@ func (c *p2pHandler) handleStream(ws *p2putil.WrappedStream, replies chan p2puti
 		}
 	}
 
+	log.Debugf("hangup: %s", ws.Stream())
 	ws.Close()
 }
 

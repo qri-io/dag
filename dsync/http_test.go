@@ -53,7 +53,7 @@ func TestSyncHTTP(t *testing.T) {
 	s := httptest.NewServer(HTTPRemoteHandler(ts))
 	defer s.Close()
 
-	cli := &HTTPClient{URL: s.URL}
+	cli := &HTTPClient{URL: s.URL + "/dsync"}
 
 	push, err := NewPush(aGetter, info, cli, false)
 	if err != nil {

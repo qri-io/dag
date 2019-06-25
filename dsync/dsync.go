@@ -27,10 +27,13 @@ import (
 	ipld "github.com/ipfs/go-ipld-format"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	"github.com/ipfs/interface-go-ipfs-core/path"
-	host "github.com/libp2p/go-libp2p-host"
+	host "github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-peer"
 	"github.com/qri-io/dag"
+	golog "github.com/ipfs/go-log"
 )
+
+var log = golog.Logger("dsync")
 
 const (
 	// default to parallelism of 3. So far 4 was enough to blow up a std k8s pod running IPFS :(
@@ -208,9 +211,12 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 	}
 
 	if cfg.HTTPRemoteAddress != "" {
+		m := http.NewServeMux()
+		m.Handle("/dsync", HTTPRemoteHandler(ds))
+
 		ds.httpServer = &http.Server{
 			Addr:    cfg.HTTPRemoteAddress,
-			Handler: HTTPRemoteHandler(ds),
+			Handler: m,
 		}
 	}
 
@@ -244,7 +250,8 @@ func (ds *Dsync) StartRemote(ctx context.Context) error {
 	if ds.p2pHandler != nil {
 		ds.p2pHandler.host.SetStreamHandler(DsyncProtocolID, ds.p2pHandler.LibP2PStreamHandler)
 	}
-
+	
+	log.Debug("dsync remote started")
 	return nil
 }
 

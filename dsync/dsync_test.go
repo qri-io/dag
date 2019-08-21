@@ -94,7 +94,7 @@ func ExampleNew() {
 		updates := push.Updates()
 		for {
 			select {
-			case update := <- updates:
+			case update := <-updates:
 				fmt.Printf("%d/%d blocks transferred\n", update.CompletedBlocks(), len(update))
 				if update.Complete() {
 					fmt.Println("done!")

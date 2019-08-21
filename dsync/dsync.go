@@ -19,18 +19,18 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
-	"strings"
 
 	"github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
+	golog "github.com/ipfs/go-log"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	path "github.com/ipfs/interface-go-ipfs-core/path"
 	host "github.com/libp2p/go-libp2p-host"
 	peer "github.com/libp2p/go-libp2p-peer"
 	"github.com/qri-io/dag"
-	golog "github.com/ipfs/go-log"
 )
 
 var log = golog.Logger("dsync")
@@ -152,7 +152,7 @@ type Config struct {
 	FinalCheck DagFinalCheck
 	// RequireAllBlocks will skip checking for blocks already present on the
 	// remote, requiring push requests to send all blocks each time
-	ReqiureAllBlocks bool
+	RequireAllBlocks bool
 }
 
 // Validate confirms the configuration is valid
@@ -196,8 +196,10 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 		lng:  localNodes,
 		bapi: blockStore,
 
-		preCheck:       cfg.PreCheck,
-		finalCheck:     cfg.FinalCheck,
+		preCheck:         cfg.PreCheck,
+		finalCheck:       cfg.FinalCheck,
+		requireAllBlocks: cfg.RequireAllBlocks,
+
 		sessionPool:    map[string]*session{},
 		sessionCancels: map[string]context.CancelFunc{},
 		sessionTTLDur:  time.Hour * 5,
@@ -250,7 +252,7 @@ func (ds *Dsync) StartRemote(ctx context.Context) error {
 	if ds.p2pHandler != nil {
 		ds.p2pHandler.host.SetStreamHandler(DsyncProtocolID, ds.p2pHandler.LibP2PStreamHandler)
 	}
-	
+
 	log.Debug("dsync remote started")
 	return nil
 }
@@ -261,7 +263,7 @@ func (ds *Dsync) syncableRemote(remoteAddr string) (rem DagSyncable, err error) 
 		if ds.p2pHandler == nil {
 			return nil, fmt.Errorf("no p2p host provided to perform p2p dsync")
 		}
-		rem = &p2pClient{remotePeerID: id, p2pHandler: ds.p2pHandler }
+		rem = &p2pClient{remotePeerID: id, p2pHandler: ds.p2pHandler}
 	} else if strings.HasPrefix(remoteAddr, "http") {
 		rem = &HTTPClient{URL: remoteAddr}
 	} else {
@@ -318,6 +320,7 @@ func (ds *Dsync) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid stri
 		cancel()
 		return
 	}
+	log.Debugf("creating receive session for CID: %s", info.RootCID().String())
 
 	if pinOnComplete && ds.pin == nil {
 		err = fmt.Errorf("remote doesn't support pinning")
@@ -355,6 +358,7 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 
 	// ReceiveBlock accepts a block from the sender, placing it in the local blockstore
 	res := sess.ReceiveBlock(hash, bytes.NewReader(data))
+	log.Debugf("received block: %s", res.Hash)
 
 	// if we're done transferring, finalize!
 	if res.Status == StatusOk && sess.Complete() {
@@ -374,6 +378,7 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 // no blocks for an early termination, ensuring that we cache a dag.Info in
 // that case as well
 func (ds *Dsync) finalizeReceive(sess *session) error {
+	log.Debug("finalizing receive session: %s", sess.id)
 	if err := ds.finalCheck(sess.ctx, *sess.info); err != nil {
 		return err
 	}

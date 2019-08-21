@@ -25,12 +25,11 @@ type session struct {
 }
 
 // newSession creates a receive state machine
-func newSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAPI, info *dag.Info, calcBlockDelta, pinOnComplete bool) (s *session, err error) {
-	// TODO (b5): ipfs api/v0/get/block doesn't allow checking for local blocks yet
-	// aren't working over ipfs api, so we can't do delta's quite yet. Just send the whole things back
+func newSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAPI, info *dag.Info, calcBlockDiff, pinOnComplete bool) (s *session, err error) {
 	diff := info.Manifest
 
-	if calcBlockDelta {
+	if calcBlockDiff {
+		log.Debug("calculating block diff")
 		if diff, err = dag.Missing(ctx, lng, info.Manifest); err != nil {
 			return nil, err
 		}
@@ -50,6 +49,7 @@ func newSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAP
 
 	go s.completionChanged()
 
+	log.Debugf("created session: %s", s.id)
 	return s, nil
 }
 

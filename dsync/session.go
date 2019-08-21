@@ -18,6 +18,7 @@ type session struct {
 	lng    ipld.NodeGetter
 	bapi   coreiface.BlockAPI
 	pin    bool
+	meta   map[string]string
 	info   *dag.Info
 	diff   *dag.Manifest
 	prog   dag.Completion
@@ -25,7 +26,7 @@ type session struct {
 }
 
 // newSession creates a receive state machine
-func newSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAPI, info *dag.Info, calcBlockDiff, pinOnComplete bool) (s *session, err error) {
+func newSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAPI, info *dag.Info, calcBlockDiff, pinOnComplete bool, meta map[string]string) (s *session, err error) {
 	diff := info.Manifest
 
 	if calcBlockDiff {
@@ -43,6 +44,7 @@ func newSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAP
 		info:   info,
 		diff:   diff,
 		pin:    pinOnComplete,
+		meta:   meta,
 		prog:   dag.NewCompletion(info.Manifest, diff),
 		progCh: make(chan dag.Completion),
 	}

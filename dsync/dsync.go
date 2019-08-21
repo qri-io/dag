@@ -57,7 +57,7 @@ type DagSyncable interface {
 	// NewReceiveSession starts a push session from local to a remote.
 	// The remote will return a delta manifest of blocks the remote needs
 	// and a session id that must be sent with each block
-	NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid string, diff *dag.Manifest, err error)
+	NewReceiveSession(info *dag.Info, pinOnComplete bool, meta map[string]string) (sid string, diff *dag.Manifest, err error)
 	// ReceiveBlock places a block on the remote
 	ReceiveBlock(sid, hash string, data []byte) ReceiveResponse
 
@@ -68,33 +68,28 @@ type DagSyncable interface {
 	GetBlock(ctx context.Context, hash string) (rawdata []byte, err error)
 }
 
-// DagPreCheck is a function that a remote will run before beginning a transfer.
-// If DagCheck returns an error, the remote will deny the request to push any
-// blocks, no session will be created and the error message will be returned
-// in the response status. DagPreCheck is the right to place to implement
-// peerID and contentID accept/reject lists.
-//
-// DagPreCheck can also reject based on size limitations by examining data
-// provided by the requester, but be advised the Info provided is gossip at
-// this point in the sync process.
-type DagPreCheck func(context.Context, dag.Info) error
+// Hook is a function that a dsync instance will call at specified points in the
+// sync lifecycle
+type Hook func(ctx context.Context, info dag.Info, meta map[string]string) error
 
 // DefaultDagPrecheck rejects all requests
-var DefaultDagPrecheck = func(context.Context, dag.Info) error {
+// Dsync users are required to override this hook to make dsync work,
+// and are expected to supply a trust model in this hook. An example trust model
+// is a peerID and contentID accept/reject list supplied by the application
+//
+// Precheck could also reject based on size limitations by examining data
+// provided by the requester, but be advised the Info provided is gossip at
+// this point in the sync process.
+//
+// If the Precheck hook returns an error the remote will deny the request to
+// push any blocks, no session will be created and the error message will be
+// returned in the response status.
+var DefaultDagPrecheck = func(context.Context, dag.Info, map[string]string) error {
 	return fmt.Errorf("remote is not configured to accept DAGs")
 }
 
-// DagFinalCheck is a function remote will call occurs after the requested push
-// has transferred blocks to the remote, giving the remote a chance to work with
-// the data that's been sent before making a final decision on weather or not
-// to keep the data in question. If DagFinalCheck returns an error the transfer
-// is halted, returning the error message to the remote.
-// any request to pin the data will be skipped.
-// TODO (b5): blocks pushed by a rejected transfer must be explicitly removed
-type DagFinalCheck func(context.Context, dag.Info) error
-
 // DefaultDagFinalCheck by default performs no check
-var DefaultDagFinalCheck = func(context.Context, dag.Info) error {
+var DefaultDagFinalCheck = func(context.Context, dag.Info, map[string]string) error {
 	return nil
 }
 
@@ -116,9 +111,11 @@ type Dsync struct {
 	p2pHandler *p2pHandler
 
 	// preCheck is called before creating a receive session
-	preCheck DagPreCheck
+	preCheck Hook
 	// dagFinalCheck is called before finalizing a receive session
-	finalCheck DagFinalCheck
+	finalCheck Hook
+	// onCompleteHook is optionally called once dag sync is complete
+	onCompleteHook Hook
 
 	// requireAllBlocks forces pushes to send *all* blocks,
 	// skipping manifest diffing
@@ -146,12 +143,17 @@ type Config struct {
 
 	// PinAPI is required for remotes to accept
 	PinAPI coreiface.PinAPI
-	// User-Supplied PreCheck function for a remote accepting DAGs
-	PreCheck DagPreCheck
-	// User-Supplied Final check function for a remote accepting DAGs
-	FinalCheck DagFinalCheck
+	// required check function for a remote accepting DAGs
+	PreCheck Hook
+	// optional check function for screening a receive before potentially pinning
+	FinalCheck Hook
+	// optional check function called after successful transfer
+	OnComplete Hook
+
 	// RequireAllBlocks will skip checking for blocks already present on the
 	// remote, requiring push requests to send all blocks each time
+	// This is a helpful override if the receiving node can't distinguish between
+	// local and network block access, as with the ipfs-http-api intreface
 	RequireAllBlocks bool
 }
 
@@ -196,13 +198,14 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 		lng:  localNodes,
 		bapi: blockStore,
 
-		preCheck:         cfg.PreCheck,
-		finalCheck:       cfg.FinalCheck,
-		requireAllBlocks: cfg.RequireAllBlocks,
+		preCheck:       cfg.PreCheck,
+		finalCheck:     cfg.FinalCheck,
+		onCompleteHook: cfg.OnComplete,
 
-		sessionPool:    map[string]*session{},
-		sessionCancels: map[string]context.CancelFunc{},
-		sessionTTLDur:  time.Hour * 5,
+		requireAllBlocks: cfg.RequireAllBlocks,
+		sessionPool:      map[string]*session{},
+		sessionCancels:   map[string]context.CancelFunc{},
+		sessionTTLDur:    time.Hour * 5,
 	}
 
 	if cfg.PinAPI != nil {
@@ -311,12 +314,12 @@ func (ds *Dsync) NewPull(cidStr, remoteAddr string) (*Pull, error) {
 // NewReceiveSession takes a manifest sent by a remote and initiates a
 // transfer session. It returns a manifest/diff of the blocks the reciever needs
 // to have a complete DAG new sessions are created with a deadline for completion
-func (ds *Dsync) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid string, diff *dag.Manifest, err error) {
+func (ds *Dsync) NewReceiveSession(info *dag.Info, pinOnComplete bool, meta map[string]string) (sid string, diff *dag.Manifest, err error) {
 
 	// TODO (b5) - figure out context passing
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(ds.sessionTTLDur))
 
-	if err = ds.preCheck(ctx, *info); err != nil {
+	if err = ds.preCheck(ctx, *info, meta); err != nil {
 		cancel()
 		return
 	}
@@ -328,7 +331,7 @@ func (ds *Dsync) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid stri
 		return
 	}
 
-	sess, err := newSession(ctx, ds.lng, ds.bapi, info, !ds.requireAllBlocks, pinOnComplete)
+	sess, err := newSession(ctx, ds.lng, ds.bapi, info, !ds.requireAllBlocks, pinOnComplete, meta)
 	if err != nil {
 		cancel()
 		return
@@ -378,8 +381,9 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 // no blocks for an early termination, ensuring that we cache a dag.Info in
 // that case as well
 func (ds *Dsync) finalizeReceive(sess *session) error {
-	log.Debug("finalizing receive session: %s", sess.id)
-	if err := ds.finalCheck(sess.ctx, *sess.info); err != nil {
+	log.Debug("finalizing receive session", sess.id)
+	if err := ds.finalCheck(sess.ctx, *sess.info, sess.meta); err != nil {
+		log.Error("final check error", err)
 		return err
 	}
 
@@ -402,6 +406,14 @@ func (ds *Dsync) finalizeReceive(sess *session) error {
 		delete(ds.sessionPool, sess.id)
 		ds.sessionLock.Unlock()
 	}()
+
+	if ds.onCompleteHook != nil {
+		log.Debug("calling completed hook")
+		if err := ds.onCompleteHook(sess.ctx, *sess.info, sess.meta); err != nil {
+			log.Errorf("completed hook error: %s", err)
+			return err
+		}
+	}
 
 	return nil
 }

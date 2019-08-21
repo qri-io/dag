@@ -156,7 +156,7 @@ func (*DsyncPlugin) Close() error {
 }
 
 // pushPreCheck enforces the allow list & max size
-func (p *DsyncPlugin) pushPreCheck(ctx context.Context, info dag.Info) error {
+func (p *DsyncPlugin) pushPreCheck(ctx context.Context, info dag.Info, _ map[string]string) error {
 	if info.Manifest.Nodes[0] == "BadHash" {
 		return fmt.Errorf("rejected for secret reasons")
 	}

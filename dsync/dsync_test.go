@@ -83,7 +83,7 @@ func ExampleNew() {
 	}
 
 	// Create a Push:
-	push, err := aDsync.NewPush(cid.String(), fmt.Sprintf("http://localhost%s", bAddr), true)
+	push, err := aDsync.NewPush(cid.String(), fmt.Sprintf("http://localhost%s/dsync", bAddr), true)
 	if err != nil {
 		panic(err)
 	}

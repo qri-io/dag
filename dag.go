@@ -298,6 +298,21 @@ func (i *Info) RootCID() cid.Cid {
 	return i.Manifest.RootCID()
 }
 
+// MarshalCBOR encodes a dag.Info as CBOR data
+func (i *Info) MarshalCBOR() (data []byte, err error) {
+	buf := &bytes.Buffer{}
+	err = codec.NewEncoder(buf, &codec.CborHandle{}).Encode(i)
+	data = buf.Bytes()
+	return
+}
+
+// UnmarshalCBORDagInfo decodes an Info from a byte slice
+func UnmarshalCBORDagInfo(data []byte) (i *Info, err error) {
+	i = &Info{}
+	err = codec.NewDecoder(bytes.NewReader(data), &codec.CborHandle{}).Decode(i)
+	return
+}
+
 // Completion tracks the presence of blocks described in a manifest
 // Completion can be used to store transfer progress, or be stored as a record
 // of which blocks in a DAG are missing

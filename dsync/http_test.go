@@ -17,9 +17,6 @@ import (
 )
 
 func TestSyncHTTP(t *testing.T) {
-	dpc := DefaultDagPrecheck
-	defer func() { DefaultDagPrecheck = dpc }()
-	DefaultDagPrecheck = func(context.Context, dag.Info) error { return nil }
 
 	ctx := context.Background()
 	_, a, err := makeAPI(ctx)
@@ -44,8 +41,17 @@ func TestSyncHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	onCompleteCalled := make(chan struct{}, 1)
+	onCompleteHook := func(_ context.Context, _ dag.Info, _ map[string]string) error {
+		onCompleteCalled <- struct{}{}
+		return nil
+	}
+
 	bGetter := &dag.NodeGetter{Dag: b.Dag()}
-	ts, err := New(bGetter, b.Block())
+	ts, err := New(bGetter, b.Block(), func(cfg *Config) {
+		cfg.PreCheck = func(context.Context, dag.Info, map[string]string) error { return nil }
+		cfg.OnComplete = onCompleteHook
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +75,8 @@ func TestSyncHTTP(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
+	<-onCompleteCalled
 }
 
 // remote implements the Remote interface on a single receive session at a time
@@ -80,7 +88,7 @@ type remote struct {
 
 func (r *remote) PushStart(info *dag.Info) (sid string, diff *dag.Manifest, err error) {
 	ctx := context.Background()
-	r.receive, err = newSession(ctx, r.lng, r.bapi, info, false, false)
+	r.receive, err = newSession(ctx, r.lng, r.bapi, info, false, false, nil)
 	if err != nil {
 		return
 	}

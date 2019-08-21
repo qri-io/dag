@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 
 	"github.com/qri-io/dag"
 )
@@ -22,13 +23,22 @@ var _ DagSyncable = (*HTTPClient)(nil)
 
 // NewReceiveSession initiates a session for pushing blocks to a remote.
 // It sends a Manifest to a remote source over HTTP
-func (rem *HTTPClient) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid string, diff *dag.Manifest, err error) {
+func (rem *HTTPClient) NewReceiveSession(info *dag.Info, pinOnComplete bool, meta map[string]string) (sid string, diff *dag.Manifest, err error) {
 	buf := &bytes.Buffer{}
 	if err = json.NewEncoder(buf).Encode(info); err != nil {
 		return
 	}
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s?pin=%t", rem.URL, pinOnComplete), buf)
+	url, err := url.Parse(rem.URL)
+	if err != nil {
+		return
+	}
+	url.Query().Add("pin", fmt.Sprintf("%t", pinOnComplete))
+	for key, val := range meta {
+		url.Query().Add(key, val)
+	}
+
+	req, err := http.NewRequest("POST", url.String(), buf)
 	if err != nil {
 		return
 	}
@@ -167,8 +177,14 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 			}
 
 			pinOnComplete := r.FormValue("pin") == "true"
+			meta := map[string]string{}
+			for key := range r.URL.Query() {
+				if key != "pin" {
+					meta[key] = r.URL.Query().Get(key)
+				}
+			}
 
-			sid, diff, err := ds.NewReceiveSession(info, pinOnComplete)
+			sid, diff, err := ds.NewReceiveSession(info, pinOnComplete, meta)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte(err.Error()))

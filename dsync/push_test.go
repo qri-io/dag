@@ -10,7 +10,7 @@ import (
 func TestPush(t *testing.T) {
 	dpc := DefaultDagPrecheck
 	defer func() { DefaultDagPrecheck = dpc }()
-	DefaultDagPrecheck = func(context.Context, dag.Info) error { return nil }
+	DefaultDagPrecheck = func(context.Context, dag.Info, map[string]string) error { return nil }
 
 	ctx := context.Background()
 	a, b := newLocalRemoteIPFSAPI(ctx, t)

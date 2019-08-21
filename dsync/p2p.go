@@ -42,16 +42,18 @@ type p2pClient struct {
 // assert at compile time that p2pClient implements DagSyncable
 var _ DagSyncable = (*p2pClient)(nil)
 
-func (c *p2pClient) NewReceiveSession(info *dag.Info, pinOnComplete bool) (sid string, diff *dag.Manifest, err error) {
+func (c *p2pClient) NewReceiveSession(info *dag.Info, pinOnComplete bool, meta map[string]string) (sid string, diff *dag.Manifest, err error) {
 	var data []byte
 	if data, err = info.MarshalCBOR(); err != nil {
 		return
 	}
 
-	msg := p2putil.NewMessage(c.host.ID(), mtNewReceive, data).WithHeaders(
-		"pin", fmt.Sprintf("%t", pinOnComplete),
-		"phase", "request",
-	)
+	headers := []string{"phase", "request", "pin", fmt.Sprintf("%t", pinOnComplete)}
+	for key, val := range meta {
+		headers = append(headers, key, val)
+	}
+
+	msg := p2putil.NewMessage(c.host.ID(), mtNewReceive, data).WithHeaders(headers...)
 
 	log.Debugf("new push session msg to %s", c.remotePeerID)
 	res, err := c.sendMessage(context.Background(), msg, c.remotePeerID)
@@ -229,7 +231,14 @@ func (c *p2pHandler) HandleNewReceive(ws *p2putil.WrappedStream, msg p2putil.Mes
 		}
 
 		pinOnComplete := msg.Header("pin") == "true"
-		sid, diff, err := c.dsync.NewReceiveSession(info, pinOnComplete)
+		meta := map[string]string{}
+		for key, val := range msg.Headers {
+			if key != "pin" && key != "phase" {
+				meta[key] = val
+			}
+		}
+
+		sid, diff, err := c.dsync.NewReceiveSession(info, pinOnComplete, meta)
 		if err != nil {
 			// TODO (b5) - send error response
 			// msg =

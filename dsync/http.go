@@ -29,16 +29,18 @@ func (rem *HTTPClient) NewReceiveSession(info *dag.Info, pinOnComplete bool, met
 		return
 	}
 
-	url, err := url.Parse(rem.URL)
+	u, err := url.Parse(rem.URL)
 	if err != nil {
 		return
 	}
-	url.Query().Add("pin", fmt.Sprintf("%t", pinOnComplete))
+	q := u.Query()
+	q.Set("pin", fmt.Sprintf("%t", pinOnComplete))
 	for key, val := range meta {
-		url.Query().Add(key, val)
+		q.Set(key, val)
 	}
+	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequest("POST", url.String(), buf)
+	req, err := http.NewRequest("POST", u.String(), buf)
 	if err != nil {
 		return
 	}
@@ -176,6 +178,7 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 				return
 			}
 
+			log.Debug("new receive via HTTP", r.URL.String())
 			pinOnComplete := r.FormValue("pin") == "true"
 			meta := map[string]string{}
 			for key := range r.URL.Query() {

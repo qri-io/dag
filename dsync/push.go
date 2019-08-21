@@ -138,7 +138,7 @@ func (snd *Push) do(ctx context.Context) (err error) {
 		// never block, so all responses are handled in their own goroutine
 		for res := range snd.responses {
 			go func(r ReceiveResponse) {
-				log.Debugf("push block response: %s. cid: %s", res.Status, res.Hash)
+				log.Debugf("push block response: %s. cid: %s", r.Status, r.Hash)
 				switch r.Status {
 				case StatusOk:
 					// this is the only place we should modify progress after creation

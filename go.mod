@@ -36,5 +36,4 @@ require (
 	github.com/multiformats/go-multihash v0.0.5
 	github.com/spf13/cobra v0.0.2
 	github.com/ugorji/go/codec v1.1.5-pre
-	google.golang.org/appengine v1.4.0 // indirect
 )

@@ -12,15 +12,13 @@ import (
 	"os"
 	"path/filepath"
 
-	ipfscoreapi "github.com/ipfs/go-ipfs/core/coreapi"
 	plugin "github.com/ipfs/go-ipfs/plugin"
 	fsrepo "github.com/ipfs/go-ipfs/repo/fsrepo"
+	golog "github.com/ipfs/go-log"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	dag "github.com/qri-io/dag"
 	dsync "github.com/qri-io/dag/dsync"
-	golog "github.com/ipfs/go-log"
 )
-
 
 var log = golog.Logger("dsync-plugin")
 
@@ -56,7 +54,7 @@ func NewDsyncPlugin() *DsyncPlugin {
 
 	return &DsyncPlugin{
 		configPath:       cfgPath,
-		LogLevel: "info",
+		LogLevel:         "info",
 		HTTPRemoteAddr:   ":2503",
 		HTTPCommandsAddr: "127.0.0.1:2502",
 		MaxDAGSize:       -1, // default to allowing any size of DAG
@@ -87,22 +85,24 @@ func (p *DsyncPlugin) Init() error {
 
 // Start the plugin
 func (p *DsyncPlugin) Start(capi coreiface.CoreAPI) error {
+	// TODO (b5):
 	// unfortunately we need to break coreAPI encapsulation here, which requires
 	// forking IPFS itself. dsync requires registering a new libp2p protocol
 	// which requires access to the underlying libp2p.Host
 	// dsync one part ipfs plugin, and one part "libp2p plugin".
 	// Since the notion of a libp2p plugin doesn't currently exist, this is worth
 	// chatting over with the ipfs & libp2p teams
-	ipfsNode, ok := capi.(*ipfscoreapi.CoreAPI)
-	if !ok {
-		return fmt.Errorf("expected coreapi to be a CoreAPI instance")
-	}
+	// ipfsNode, ok := capi.(*ipfscoreapi.CoreAPI)
+	// if !ok {
+	// 	return fmt.Errorf("expected coreapi to be a CoreAPI instance")
+	// }
 
 	// check for a p2p host value:
-	libp2pHost := ipfsNode.Host()
-	if libp2pHost == nil {
-		return fmt.Errorf("no p2p host present, skipping dsync registration")
-	}
+	// TODO (b5) - requires changes to core IPFS interface
+	// libp2pHost := ipfsNode.Host()
+	// if libp2pHost == nil {
+	// 	return fmt.Errorf("no p2p host present, skipping dsync registration")
+	// }
 
 	// create an ipld NodeGetter that doesn't perform any network requests
 	// without creating a local-only node getter, the act of asking for
@@ -116,7 +116,8 @@ func (p *DsyncPlugin) Start(capi coreiface.CoreAPI) error {
 	p.host, err = dsync.New(lng, capi.Block(), func(cfg *dsync.Config) {
 		// if supplied a libp2phost, dsync will register a /dsync protocol
 		// when StartRemote is called
-		cfg.Libp2pHost = libp2pHost
+		// TODO (b5) - re-enable once we can get a libp2p.Host from an IPFS node
+		// cfg.Libp2pHost = libp2pHost
 
 		// address dsync will listen on.
 		// NOTE: It would ba *amazing* if we could avoid consuming another
@@ -136,9 +137,10 @@ func (p *DsyncPlugin) Start(capi coreiface.CoreAPI) error {
 		return err
 	}
 
-	// start listening for remote pushes & pulls. We bind this context to the
-	// one provided by ipfs.
-	if err = p.host.StartRemote(ipfsNode.Context()); err != nil {
+	// start listening for remote pushes & pulls
+	// TODO (b5) - We should be bind this context to the one provided by ipfs.
+	// if err = p.host.StartRemote(ipfsNode.Context()); err != nil {
+	if err = p.host.StartRemote(context.Background()); err != nil {
 		return err
 	}
 

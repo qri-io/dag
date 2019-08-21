@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	host "github.com/libp2p/go-libp2p-core/host"
-	libp2p "github.com/libp2p/go-libp2p-core"
+	host "github.com/libp2p/go-libp2p-host"
+	net "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 	protocol "github.com/libp2p/go-libp2p-protocol"
 	"github.com/qri-io/dag"
@@ -154,7 +154,7 @@ func newp2pHandler(dsync *Dsync, host host.Host) *p2pHandler {
 }
 
 // LibP2PStreamHandler provides remote access over p2p
-func (c *p2pHandler) LibP2PStreamHandler(s libp2p.Stream) {
+func (c *p2pHandler) LibP2PStreamHandler(s net.Stream) {
 	c.handleStream(p2putil.WrapStream(s), nil)
 }
 

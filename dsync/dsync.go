@@ -323,7 +323,7 @@ func (ds *Dsync) NewReceiveSession(info *dag.Info, pinOnComplete bool, meta map[
 		cancel()
 		return
 	}
-	log.Debugf("creating receive session for CID: %s", info.RootCID().String())
+	log.Debugf("creating receive session for CID: %s with %d meta keys", info.RootCID().String(), len(meta))
 
 	if pinOnComplete && ds.pin == nil {
 		err = fmt.Errorf("remote doesn't support pinning")

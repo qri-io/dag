@@ -12,7 +12,7 @@ import (
 )
 
 // NewPull sets up fetching a DAG at an id from a remote
-func NewPull(cidStr string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem DagSyncable) (pull *Pull, err error) {
+func NewPull(cidStr string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem DagSyncable, meta map[string]string) (pull *Pull, err error) {
 	f := &Pull{
 		path:        cidStr,
 		lng:         lng,
@@ -28,8 +28,8 @@ func NewPull(cidStr string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Da
 }
 
 // NewPullWithInfo creates a pull when we already have a dag.Info
-func NewPullWithInfo(info *dag.Info, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem DagSyncable) (pull *Pull, err error) {
-	f, err := NewPull(info.RootCID().String(), lng, bapi, rem)
+func NewPullWithInfo(info *dag.Info, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem DagSyncable, meta map[string]string) (pull *Pull, err error) {
+	f, err := NewPull(info.RootCID().String(), lng, bapi, rem, meta)
 	if err != nil {
 		return nil, err
 	}
@@ -40,6 +40,7 @@ func NewPullWithInfo(info *dag.Info, lng ipld.NodeGetter, bapi coreiface.BlockAP
 // Pull coordinates the transfer of missing blocks in a DAG from a remote to a block store
 type Pull struct {
 	path        string
+	meta        map[string]string
 	info        *dag.Info
 	diff        *dag.Manifest
 	remote      DagSyncable
@@ -76,7 +77,7 @@ func (f *Pull) Do(ctx context.Context) (err error) {
 	//    - every time we receive a block, check if we're done
 	if f.info == nil {
 		// request a manifest from the remote if we don't have one
-		if f.info, err = f.remote.GetDagInfo(ctx, f.path); err != nil {
+		if f.info, err = f.remote.GetDagInfo(ctx, f.path, f.meta); err != nil {
 			return
 		}
 	}

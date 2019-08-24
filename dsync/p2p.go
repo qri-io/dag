@@ -32,6 +32,8 @@ var (
 	mtGetDagInfo = p2putil.MsgType("get_daginfo")
 	// mtGetBlock identifies the "get_block" message type
 	mtGetBlock = p2putil.MsgType("get_block")
+	// mtRemoveCID identifies the "remove_cid" message type
+	mtRemoveCID = p2putil.MsgType("remove_cid")
 )
 
 type p2pClient struct {
@@ -106,10 +108,14 @@ func (c *p2pClient) ReceiveBlock(sid, cidStr string, data []byte) ReceiveRespons
 
 // GetDagInfo asks the remote for info specified by a the root identifier
 // string of a DAG
-func (c *p2pClient) GetDagInfo(ctx context.Context, cidStr string) (info *dag.Info, err error) {
-	msg := p2putil.NewMessage(c.host.ID(), mtGetDagInfo, nil).WithHeaders(
-		"cid", cidStr,
-	)
+func (c *p2pClient) GetDagInfo(ctx context.Context, cidStr string, meta map[string]string) (info *dag.Info, err error) {
+
+	headers := []string{"phase", "request", "cid", cidStr}
+	for key, val := range meta {
+		headers = append(headers, key, val)
+	}
+
+	msg := p2putil.NewMessage(c.host.ID(), mtGetDagInfo, nil).WithHeaders(headers...)
 
 	res, err := c.sendMessage(ctx, msg, c.remotePeerID)
 	if err != nil {
@@ -133,15 +139,33 @@ func (c *p2pClient) GetBlock(ctx context.Context, cidStr string) (rawdata []byte
 	return res.Body, nil
 }
 
+// RemoveCID asks the remote to remove a CID
+func (c *p2pClient) RemoveCID(ctx context.Context, cidStr string, meta map[string]string) (err error) {
+	headers := []string{"phase", "request", "cid", cidStr}
+	for key, val := range meta {
+		headers = append(headers, key, val)
+	}
+
+	msg := p2putil.NewMessage(c.host.ID(), mtRemoveCID, nil).WithHeaders(headers...)
+
+	res, err := c.sendMessage(ctx, msg, c.remotePeerID)
+	if err != nil {
+		return err
+	}
+
+	if e := res.Header("error"); e != "" {
+		return fmt.Errorf(e)
+	}
+
+	return nil
+}
+
 // p2pHandler implements dsync as a libp2p protocol handler
 type p2pHandler struct {
 	dsync    *Dsync
 	host     host.Host
 	handlers map[p2putil.MsgType]p2putil.HandlerFunc
 }
-
-// assert at compile time that p2pHandler implements DagSyncable
-// var _ DagSyncable = (*p2pHandler)(nil)
 
 // newp2pHandler creates a p2p remote stream handler from a dsync.Remote
 func newp2pHandler(dsync *Dsync, host host.Host) *p2pHandler {
@@ -151,6 +175,7 @@ func newp2pHandler(dsync *Dsync, host host.Host) *p2pHandler {
 		mtReceiveBlock: c.HandleReceiveBlock,
 		mtGetDagInfo:   c.HandleReqManifest,
 		mtGetBlock:     c.HandleGetBlock,
+		mtRemoveCID:    c.HandleRemoveCID,
 	}
 	return c
 }
@@ -310,8 +335,15 @@ func (c *p2pHandler) HandleReqManifest(ws *p2putil.WrappedStream, msg p2putil.Me
 	cidStr := msg.Header("cid")
 	res := msg.WithHeaders("phase", "response")
 
+	meta := map[string]string{}
+	for key, val := range msg.Headers {
+		if key != "cid" && key != "phase" {
+			meta[key] = val
+		}
+	}
+
 	// TODO (b5): pass a context into here
-	if di, err := c.dsync.GetDagInfo(context.Background(), cidStr); err != nil {
+	if di, err := c.dsync.GetDagInfo(context.Background(), cidStr, meta); err != nil {
 		res = res.WithHeaders("error", err.Error())
 	} else {
 		data, err := di.MarshalCBOR()
@@ -343,5 +375,34 @@ func (c *p2pHandler) HandleGetBlock(ws *p2putil.WrappedStream, msg p2putil.Messa
 	if err := ws.SendMessage(res); err != nil {
 		return true
 	}
+	return false
+}
+
+// HandleRemoveCID removes a CID on the remote
+func (c *p2pHandler) HandleRemoveCID(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
+	if msg.Header("phase") == "request" {
+
+		cid := msg.Header("cid")
+		meta := map[string]string{}
+		for key, val := range msg.Headers {
+			if key != "pin" && key != "phase" {
+				meta[key] = val
+			}
+		}
+
+		res := msg.WithHeaders(
+			"phase", "response",
+			"cid", cid,
+		)
+
+		if err := c.dsync.RemoveCID(context.Background(), cid, meta); err != nil {
+			res = msg.WithHeaders("error", err.Error())
+		}
+
+		if err := ws.SendMessage(res); err != nil {
+			return true
+		}
+	}
+
 	return false
 }

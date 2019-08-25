@@ -224,16 +224,18 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 		lng:  localNodes,
 		bapi: blockStore,
 
+		requireAllBlocks: cfg.RequireAllBlocks,
+		allowRemoves:     cfg.AllowRemoves,
+
 		preCheck:        cfg.PushPreCheck,
 		finalCheck:      cfg.PushFinalCheck,
 		onCompleteHook:  cfg.PushComplete,
 		getDagInfoCheck: cfg.GetDagInfoCheck,
 		removeCheck:     cfg.RemoveCheck,
 
-		requireAllBlocks: cfg.RequireAllBlocks,
-		sessionPool:      map[string]*session{},
-		sessionCancels:   map[string]context.CancelFunc{},
-		sessionTTLDur:    time.Hour * 5,
+		sessionPool:    map[string]*session{},
+		sessionCancels: map[string]context.CancelFunc{},
+		sessionTTLDur:  time.Hour * 5,
 	}
 
 	if cfg.PinAPI != nil {
@@ -492,6 +494,7 @@ func (ds *Dsync) RemoveCID(ctx context.Context, cidStr string, meta map[string]s
 		return ErrRemoveNotSupported
 	}
 
+	log.Debug("removing cid", cidStr)
 	if ds.removeCheck != nil {
 		info := dag.Info{Manifest: &dag.Manifest{Nodes: []string{cidStr}}}
 		if err := ds.removeCheck(ctx, info, meta); err != nil {

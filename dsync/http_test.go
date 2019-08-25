@@ -1,19 +1,14 @@
 package dsync
 
 import (
-	"bytes"
 	"context"
 	"io/ioutil"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/qri-io/dag"
-
-	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
-	ipld "github.com/ipfs/go-ipld-format"
-	coreiface "github.com/ipfs/interface-go-ipfs-core"
+	"github.com/qri-io/dag"
 )
 
 func TestSyncHTTP(t *testing.T) {
@@ -29,6 +24,7 @@ func TestSyncHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// yooooooooooooooooooooo
 	f := files.NewReaderFile(ioutil.NopCloser(strings.NewReader("y" + strings.Repeat("o", 350))))
 	path, err := a.Unixfs().Add(ctx, f)
 	if err != nil {
@@ -47,16 +43,24 @@ func TestSyncHTTP(t *testing.T) {
 		return nil
 	}
 
+	removeCheckCalled := make(chan struct{}, 1)
+	removeCheckHook := func(_ context.Context, _ dag.Info, _ map[string]string) error {
+		removeCheckCalled <- struct{}{}
+		return nil
+	}
+
 	bGetter := &dag.NodeGetter{Dag: b.Dag()}
-	ts, err := New(bGetter, b.Block(), func(cfg *Config) {
+	bdsync, err := New(bGetter, b.Block(), func(cfg *Config) {
+		cfg.AllowRemoves = true
 		cfg.PushPreCheck = func(context.Context, dag.Info, map[string]string) error { return nil }
 		cfg.PushComplete = onCompleteHook
+		cfg.RemoveCheck = removeCheckHook
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	s := httptest.NewServer(HTTPRemoteHandler(ts))
+	s := httptest.NewServer(HTTPRemoteHandler(bdsync))
 	defer s.Close()
 
 	cli := &HTTPClient{URL: s.URL + "/dsync"}
@@ -77,49 +81,33 @@ func TestSyncHTTP(t *testing.T) {
 	}
 
 	<-onCompleteCalled
+
+	if err := cli.RemoveCID(ctx, info.RootCID().String(), nil); err != nil {
+		t.Error(err)
+	}
+
+	<-removeCheckCalled
 }
 
-// remote implements the Remote interface on a single receive session at a time
-type remote struct {
-	receive *session
-	lng     ipld.NodeGetter
-	bapi    coreiface.BlockAPI
-}
-
-func (r *remote) PushStart(info *dag.Info) (sid string, diff *dag.Manifest, err error) {
+func TestRemoveNotSupported(t *testing.T) {
 	ctx := context.Background()
-	r.receive, err = newSession(ctx, r.lng, r.bapi, info, false, false, nil)
-	if err != nil {
-		return
-	}
-	sid = r.receive.id
-	diff = r.receive.diff
-	return
-}
 
-func (r *remote) PushBlock(sid, hash string, data []byte) ReceiveResponse {
-	return r.receive.ReceiveBlock(hash, bytes.NewReader(data))
-}
-
-func (r *remote) PullManifest(ctx context.Context, hash string) (mfst *dag.Manifest, err error) {
-	id, err := cid.Parse(hash)
+	_, b, err := makeAPI(ctx)
 	if err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
 
-	return dag.NewManifest(ctx, r.lng, id)
-}
-
-func (r *remote) GetBlock(ctx context.Context, hash string) ([]byte, error) {
-	id, err := cid.Parse(hash)
+	bGetter := &dag.NodeGetter{Dag: b.Dag()}
+	bdsync, err := New(bGetter, b.Block())
 	if err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
 
-	node, err := r.lng.Get(ctx, id)
-	if err != nil {
-		return nil, err
-	}
+	s := httptest.NewServer(HTTPRemoteHandler(bdsync))
+	defer s.Close()
 
-	return node.RawData(), nil
+	cli := &HTTPClient{URL: s.URL + "/dsync"}
+	if err := cli.RemoveCID(ctx, "foo", nil); err != ErrRemoveNotSupported {
+		t.Errorf("expected error remoce not supported, got: %s", err.Error())
+	}
 }

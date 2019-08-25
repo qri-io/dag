@@ -79,7 +79,7 @@ func TestNewP2P(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// We want to see progress, so we spin up a goroutine to listen for  updates
+	// We want to see progress, so we spin up a goroutine to listen for updates
 	waitForFmt := make(chan struct{})
 	go func() {
 		updates := push.Updates()

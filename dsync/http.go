@@ -175,13 +175,13 @@ func (rem *HTTPClient) RemoveCID(ctx context.Context, id string, meta map[string
 		return
 	}
 	q := u.Query()
-	q.Set("manifest", id)
+	q.Set("cid", id)
 	for key, val := range meta {
 		q.Set(key, val)
 	}
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequest("GET", u.String(), nil)
+	req, err := http.NewRequest("DELETE", u.String(), nil)
 	if err != nil {
 		return err
 	}

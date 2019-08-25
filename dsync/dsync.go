@@ -156,6 +156,8 @@ type Config struct {
 	HTTPRemoteAddress string
 	// to send & push over libp2p connections, provide a libp2p host
 	Libp2pHost host.Host
+	// PinAPI is required for remotes to accept pinning requests
+	PinAPI coreiface.PinAPI
 
 	// RequireAllBlocks will skip checking for blocks already present on the
 	// remote, requiring push requests to send all blocks each time
@@ -166,22 +168,27 @@ type Config struct {
 	// disabled by default
 	AllowRemoves bool
 
-	// PinAPI is required for remotes to accept
-	PinAPI coreiface.PinAPI
-	// required check function for a remote accepting DAGs
-	PreCheck Hook
+	// required check function for a remote accepting DAGs, this hook will be
+	// called before a push is allowed to begin
+	PushPreCheck Hook
 	// optional check function for screening a receive before potentially pinning
-	FinalCheck Hook
+	PushFinalCheck Hook
 	// optional check function called after successful transfer
-	OnComplete Hook
+	PushComplete Hook
+	// optional check to run on dagInfo requests before sending an info back
+	GetDagInfoCheck Hook
+	// optional check to run before executing a remove operation
+	// the dag.Info given to this check will only contain the root CID being
+	// removed
+	RemoveCheck Hook
 }
 
 // Validate confirms the configuration is valid
 func (cfg *Config) Validate() error {
-	if cfg.PreCheck == nil {
+	if cfg.PushPreCheck == nil {
 		return fmt.Errorf("PreCheck is required")
 	}
-	if cfg.FinalCheck == nil {
+	if cfg.PushFinalCheck == nil {
 		return fmt.Errorf("FinalCheck is required")
 	}
 	return nil
@@ -201,8 +208,8 @@ func OptLibp2pHost(host host.Host) func(cfg *Config) {
 // to get an offline-only node getter from an ipfs CoreAPI interface
 func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func(cfg *Config)) (*Dsync, error) {
 	cfg := &Config{
-		PreCheck:   DefaultDagPrecheck,
-		FinalCheck: DefaultDagFinalCheck,
+		PushPreCheck:   DefaultDagPrecheck,
+		PushFinalCheck: DefaultDagFinalCheck,
 	}
 
 	for _, opt := range opts {
@@ -217,9 +224,11 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 		lng:  localNodes,
 		bapi: blockStore,
 
-		preCheck:       cfg.PreCheck,
-		finalCheck:     cfg.FinalCheck,
-		onCompleteHook: cfg.OnComplete,
+		preCheck:        cfg.PushPreCheck,
+		finalCheck:      cfg.PushFinalCheck,
+		onCompleteHook:  cfg.PushComplete,
+		getDagInfoCheck: cfg.GetDagInfoCheck,
+		removeCheck:     cfg.RemoveCheck,
 
 		requireAllBlocks: cfg.RequireAllBlocks,
 		sessionPool:      map[string]*session{},

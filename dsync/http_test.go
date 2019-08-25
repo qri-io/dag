@@ -49,8 +49,8 @@ func TestSyncHTTP(t *testing.T) {
 
 	bGetter := &dag.NodeGetter{Dag: b.Dag()}
 	ts, err := New(bGetter, b.Block(), func(cfg *Config) {
-		cfg.PreCheck = func(context.Context, dag.Info, map[string]string) error { return nil }
-		cfg.OnComplete = onCompleteHook
+		cfg.PushPreCheck = func(context.Context, dag.Info, map[string]string) error { return nil }
+		cfg.PushComplete = onCompleteHook
 	})
 	if err != nil {
 		t.Fatal(err)

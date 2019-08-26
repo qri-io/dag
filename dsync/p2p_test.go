@@ -53,7 +53,7 @@ func TestNewP2P(t *testing.T) {
 
 		// we MUST override the PreCheck function. In this example we're making sure
 		// no one sends us a bad hash:
-		cfg.PreCheck = func(ctx context.Context, info dag.Info, _ map[string]string) error {
+		cfg.PushPreCheck = func(ctx context.Context, info dag.Info, _ map[string]string) error {
 			if info.Manifest.Nodes[0] == "BadHash" {
 				return fmt.Errorf("rejected for secret reasons")
 			}
@@ -79,7 +79,7 @@ func TestNewP2P(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// We want to see progress, so we spin up a goroutine to listen for  updates
+	// We want to see progress, so we spin up a goroutine to listen for updates
 	waitForFmt := make(chan struct{})
 	go func() {
 		updates := push.Updates()

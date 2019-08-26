@@ -107,9 +107,19 @@ func (rem *HTTPClient) ReceiveBlock(sid, hash string, data []byte) ReceiveRespon
 }
 
 // GetDagInfo fetches a manifest from a remote source over HTTP
-func (rem *HTTPClient) GetDagInfo(ctx context.Context, id string) (info *dag.Info, err error) {
-	url := fmt.Sprintf("%s?manifest=%s", rem.URL, id)
-	req, err := http.NewRequest("GET", url, nil)
+func (rem *HTTPClient) GetDagInfo(ctx context.Context, id string, meta map[string]string) (info *dag.Info, err error) {
+	u, err := url.Parse(rem.URL)
+	if err != nil {
+		return
+	}
+	q := u.Query()
+	q.Set("manifest", id)
+	for key, val := range meta {
+		q.Set(key, val)
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequest("GET", u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +168,43 @@ func (rem *HTTPClient) GetBlock(ctx context.Context, id string) (data []byte, er
 	return ioutil.ReadAll(res.Body)
 }
 
+// RemoveCID asks a remote to remove a CID
+func (rem *HTTPClient) RemoveCID(ctx context.Context, id string, meta map[string]string) (err error) {
+	u, err := url.Parse(rem.URL)
+	if err != nil {
+		return
+	}
+	q := u.Query()
+	q.Set("cid", id)
+	for key, val := range meta {
+		q.Set(key, val)
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequest("DELETE", u.String(), nil)
+	if err != nil {
+		return err
+	}
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+
+	if res.StatusCode != http.StatusOK {
+		var msg string
+		if data, err := ioutil.ReadAll(res.Body); err == nil {
+			msg = string(data)
+		}
+		if msg == ErrRemoveNotSupported.Error() {
+			return ErrRemoveNotSupported
+		}
+		return fmt.Errorf("remote: %d %s", res.StatusCode, msg)
+	}
+
+	return nil
+}
+
 // HTTPRemoteHandler exposes a Dsync remote over HTTP by exposing a HTTP handler
 // that interlocks with methods exposed by HTTPClient
 func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
@@ -178,7 +225,6 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 				return
 			}
 
-			log.Debug("new receive via HTTP", r.URL.String())
 			pinOnComplete := r.FormValue("pin") == "true"
 			meta := map[string]string{}
 			for key := range r.URL.Query() {
@@ -224,7 +270,15 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte("either manifest or block query params are required"))
 			} else if mfstID != "" {
-				mfst, err := ds.GetDagInfo(r.Context(), mfstID)
+
+				meta := map[string]string{}
+				for key := range r.URL.Query() {
+					if key != "manifest" {
+						meta[key] = r.URL.Query().Get(key)
+					}
+				}
+
+				mfst, err := ds.GetDagInfo(r.Context(), mfstID, meta)
 				if err != nil {
 					w.WriteHeader(http.StatusInternalServerError)
 					w.Write([]byte(err.Error()))
@@ -250,6 +304,22 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 				w.Header().Set("Content-Type", "application/octet-stream")
 				w.Write(data)
 			}
+		case "DELETE":
+			cid := r.FormValue("cid")
+			meta := map[string]string{}
+			for key := range r.URL.Query() {
+				if key != "cid" {
+					meta[key] = r.URL.Query().Get(key)
+				}
+			}
+
+			if err := ds.RemoveCID(r.Context(), cid, meta); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(err.Error()))
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
 		}
 	}
 }

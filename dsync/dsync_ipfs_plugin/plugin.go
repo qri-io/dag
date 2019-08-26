@@ -128,7 +128,7 @@ func (p *DsyncPlugin) Start(capi coreiface.CoreAPI) error {
 
 		// we MUST override the PreCheck function. In this example we're making sure
 		// no one sends us a bad hash:
-		cfg.PreCheck = p.pushPreCheck
+		cfg.PushPreCheck = p.pushPreCheck
 
 		// in order for remotes to allow pinning, dsync must be provided a PinAPI:
 		cfg.PinAPI = capi.Pin()
@@ -320,7 +320,7 @@ func newPullHandler(dsyncHost *dsync.Dsync) http.HandlerFunc {
 			}
 			fmt.Printf("performing pull:\n\tcid: %s\n\tremote: %s\n\tpin: %t\n", p.Cid, p.Addr, p.Pin)
 
-			pull, err := dsyncHost.NewPull(p.Cid, p.Addr)
+			pull, err := dsyncHost.NewPull(p.Cid, p.Addr, nil)
 			if err != nil {
 				fmt.Printf("error creating pull: %s\n", err.Error())
 				w.Write([]byte(err.Error()))

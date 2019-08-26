@@ -63,10 +63,19 @@ type DagSyncable interface {
 
 	// GetDagInfo asks the remote for info specified by a the root identifier
 	// string of a DAG
-	GetDagInfo(ctx context.Context, cidStr string) (info *dag.Info, err error)
+	GetDagInfo(ctx context.Context, cidStr string, meta map[string]string) (info *dag.Info, err error)
 	// GetBlock gets a block of data from the remote
 	GetBlock(ctx context.Context, hash string) (rawdata []byte, err error)
+
+	// RemoveCID asks the remote to remove a cid. Supporting deletes are optional.
+	// DagSyncables that don't implement DeleteCID must return
+	// ErrDeleteNotSupported
+	RemoveCID(ctx context.Context, cidStr string, meta map[string]string) (err error)
 }
+
+// ErrRemoveNotSupported is the error value returned by remotes that don't
+// support delete operations
+var ErrRemoveNotSupported = fmt.Errorf("remove is not supported")
 
 // Hook is a function that a dsync instance will call at specified points in the
 // sync lifecycle
@@ -110,16 +119,23 @@ type Dsync struct {
 	// struct for accepting p2p dsync requests
 	p2pHandler *p2pHandler
 
+	// requireAllBlocks forces pushes to send *all* blocks,
+	// skipping manifest diffing
+	requireAllBlocks bool
+	// should dsync honor remove requests?
+	allowRemoves bool
+
 	// preCheck is called before creating a receive session
 	preCheck Hook
 	// dagFinalCheck is called before finalizing a receive session
 	finalCheck Hook
 	// onCompleteHook is optionally called once dag sync is complete
 	onCompleteHook Hook
-
-	// requireAllBlocks forces pushes to send *all* blocks,
-	// skipping manifest diffing
-	requireAllBlocks bool
+	// getDagInfoCheck is an optional hook to call when a client asks for a dag
+	// info
+	getDagInfoCheck Hook
+	// removeCheck is an optional hook to call before allowing a delete
+	removeCheck Hook
 
 	// inbound transfers in progress, will be nil if not acting as a remote
 	sessionLock    sync.Mutex
@@ -140,29 +156,39 @@ type Config struct {
 	HTTPRemoteAddress string
 	// to send & push over libp2p connections, provide a libp2p host
 	Libp2pHost host.Host
-
-	// PinAPI is required for remotes to accept
+	// PinAPI is required for remotes to accept pinning requests
 	PinAPI coreiface.PinAPI
-	// required check function for a remote accepting DAGs
-	PreCheck Hook
-	// optional check function for screening a receive before potentially pinning
-	FinalCheck Hook
-	// optional check function called after successful transfer
-	OnComplete Hook
 
 	// RequireAllBlocks will skip checking for blocks already present on the
 	// remote, requiring push requests to send all blocks each time
 	// This is a helpful override if the receiving node can't distinguish between
 	// local and network block access, as with the ipfs-http-api intreface
 	RequireAllBlocks bool
+	// AllowRemoves let's dsync opt into remove requests. removes are
+	// disabled by default
+	AllowRemoves bool
+
+	// required check function for a remote accepting DAGs, this hook will be
+	// called before a push is allowed to begin
+	PushPreCheck Hook
+	// optional check function for screening a receive before potentially pinning
+	PushFinalCheck Hook
+	// optional check function called after successful transfer
+	PushComplete Hook
+	// optional check to run on dagInfo requests before sending an info back
+	GetDagInfoCheck Hook
+	// optional check to run before executing a remove operation
+	// the dag.Info given to this check will only contain the root CID being
+	// removed
+	RemoveCheck Hook
 }
 
 // Validate confirms the configuration is valid
 func (cfg *Config) Validate() error {
-	if cfg.PreCheck == nil {
+	if cfg.PushPreCheck == nil {
 		return fmt.Errorf("PreCheck is required")
 	}
-	if cfg.FinalCheck == nil {
+	if cfg.PushFinalCheck == nil {
 		return fmt.Errorf("FinalCheck is required")
 	}
 	return nil
@@ -182,8 +208,8 @@ func OptLibp2pHost(host host.Host) func(cfg *Config) {
 // to get an offline-only node getter from an ipfs CoreAPI interface
 func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func(cfg *Config)) (*Dsync, error) {
 	cfg := &Config{
-		PreCheck:   DefaultDagPrecheck,
-		FinalCheck: DefaultDagFinalCheck,
+		PushPreCheck:   DefaultDagPrecheck,
+		PushFinalCheck: DefaultDagFinalCheck,
 	}
 
 	for _, opt := range opts {
@@ -198,14 +224,18 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 		lng:  localNodes,
 		bapi: blockStore,
 
-		preCheck:       cfg.PreCheck,
-		finalCheck:     cfg.FinalCheck,
-		onCompleteHook: cfg.OnComplete,
-
 		requireAllBlocks: cfg.RequireAllBlocks,
-		sessionPool:      map[string]*session{},
-		sessionCancels:   map[string]context.CancelFunc{},
-		sessionTTLDur:    time.Hour * 5,
+		allowRemoves:     cfg.AllowRemoves,
+
+		preCheck:        cfg.PushPreCheck,
+		finalCheck:      cfg.PushFinalCheck,
+		onCompleteHook:  cfg.PushComplete,
+		getDagInfoCheck: cfg.GetDagInfoCheck,
+		removeCheck:     cfg.RemoveCheck,
+
+		sessionPool:    map[string]*session{},
+		sessionCancels: map[string]context.CancelFunc{},
+		sessionTTLDur:  time.Hour * 5,
 	}
 
 	if cfg.PinAPI != nil {
@@ -303,12 +333,12 @@ func (ds *Dsync) NewPushInfo(info *dag.Info, remoteAddr string, pinOnComplete bo
 
 // NewPull creates a pull. A pull fetches an entire DAG from a remote, placing
 // it in the local block store
-func (ds *Dsync) NewPull(cidStr, remoteAddr string) (*Pull, error) {
+func (ds *Dsync) NewPull(cidStr, remoteAddr string, meta map[string]string) (*Pull, error) {
 	rem, err := ds.syncableRemote(remoteAddr)
 	if err != nil {
 		return nil, err
 	}
-	return NewPull(cidStr, ds.lng, ds.bapi, rem)
+	return NewPull(cidStr, ds.lng, ds.bapi, rem, meta)
 }
 
 // NewReceiveSession takes a manifest sent by a remote and initiates a
@@ -419,7 +449,7 @@ func (ds *Dsync) finalizeReceive(sess *session) error {
 }
 
 // GetDagInfo gets the manifest for a DAG rooted at id, checking any configured cache before falling back to generating a new manifest
-func (ds *Dsync) GetDagInfo(ctx context.Context, hash string) (info *dag.Info, err error) {
+func (ds *Dsync) GetDagInfo(ctx context.Context, hash string, meta map[string]string) (info *dag.Info, err error) {
 	// check cache if one is specified
 	if ds.infoStore != nil {
 		if info, err = ds.infoStore.DAGInfo(ctx, hash); err == nil {
@@ -433,7 +463,18 @@ func (ds *Dsync) GetDagInfo(ctx context.Context, hash string) (info *dag.Info, e
 		return nil, err
 	}
 
-	return dag.NewInfo(ctx, ds.lng, id)
+	info, err = dag.NewInfo(ctx, ds.lng, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if ds.getDagInfoCheck != nil {
+		if err = ds.getDagInfoCheck(ctx, *info, meta); err != nil {
+			return nil, err
+		}
+	}
+
+	return info, nil
 }
 
 // GetBlock returns a single block from the store
@@ -444,4 +485,26 @@ func (ds *Dsync) GetBlock(ctx context.Context, hash string) ([]byte, error) {
 	}
 
 	return ioutil.ReadAll(rdr)
+}
+
+// RemoveCID unpins a CID if removes are enabled, does not immideately remove
+// unpinned content
+func (ds *Dsync) RemoveCID(ctx context.Context, cidStr string, meta map[string]string) error {
+	if !ds.allowRemoves {
+		return ErrRemoveNotSupported
+	}
+
+	log.Debug("removing cid", cidStr)
+	if ds.removeCheck != nil {
+		info := dag.Info{Manifest: &dag.Manifest{Nodes: []string{cidStr}}}
+		if err := ds.removeCheck(ctx, info, meta); err != nil {
+			return err
+		}
+	}
+
+	if ds.pin != nil {
+		return ds.pin.Rm(ctx, path.New(cidStr))
+	}
+
+	return nil
 }

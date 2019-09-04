@@ -34,8 +34,7 @@ require (
 	github.com/libp2p/go-libp2p-protocol v0.0.1
 	github.com/multiformats/go-multicodec v0.1.6
 	github.com/multiformats/go-multihash v0.0.5
-	github.com/prometheus/common v0.4.0
 	github.com/spf13/cobra v0.0.2
 	github.com/ugorji/go/codec v1.1.5-pre
-	google.golang.org/appengine v1.4.0 // indirect
+	golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7 // indirect
 )

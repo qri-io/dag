@@ -1,3 +1,41 @@
+# [v0.2.0](https://github.com/qri-io/dag/compare/v0.1.0...v0.2.0) (2019-09-04)
+
+# Overhauled Dsync with new API, P2P support, Push & Pull hooks
+We've completely reworked dsync to make the API easier to work with, and add support for p2p as a dsync transport!
+
+This new API includes configurable _hooks_ integrated into the lifecycle of push & pulls. Check out `ExampleNew` in `dag/dsync/dsync_test.go` for an annotated overview.
+
+We're using this new dsync work as the basis for "remotes" in [qri](https://github.com/qri-io/qri), which makes for a nice production-grade example. 
+
+### Bug Fixes
+
+* **dsync:** set RequireAllBlocks properly from config, add logging ([eb315be](https://github.com/qri-io/dag/commit/eb315be))
+* **dsync meta:** fix url encoding of meta ([7fe112d](https://github.com/qri-io/dag/commit/7fe112d))
+* **vet:** fix go vet errors ([7835ec5](https://github.com/qri-io/dag/commit/7835ec5))
+* NewLocalNodeGetter lets us fetch blocks from local repo only ([8a6c24c](https://github.com/qri-io/dag/commit/8a6c24c))
+
+
+### Code Refactoring
+
+* **dsync:** overhaul dsync API around push/pull & transfer ([c3af21d](https://github.com/qri-io/dag/commit/c3af21d))
+
+
+### Features
+
+* **dsync:** add pinning on push completion ([7928c15](https://github.com/qri-io/dag/commit/7928c15))
+* **dsync:** associate key-value metadata with a push ([184c152](https://github.com/qri-io/dag/commit/184c152))
+* **dsync:** initial dsync over a libp2p connection ([c45ec51](https://github.com/qri-io/dag/commit/c45ec51))
+* **dsync plugin:** initial support for dsync as a plugin ([ba579df](https://github.com/qri-io/dag/commit/ba579df))
+* **dsync remove:** added hooks, remove, and meta params to dsync ([7d1e921](https://github.com/qri-io/dag/commit/7d1e921))
+* **p2p:** initial support for dsync pushing over libp2p ([5c0afa9](https://github.com/qri-io/dag/commit/5c0afa9))
+
+
+### BREAKING CHANGES
+
+* **dsync:** api is completely overhauled dependants will need to refactor
+
+
+
 <a name="0.1.0"></a>
 #  (2019-06-03)
 

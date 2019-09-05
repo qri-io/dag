@@ -438,7 +438,6 @@ func (ds *Dsync) finalizeReceive(sess *session) error {
 	}()
 
 	if ds.onCompleteHook != nil {
-		log.Debug("calling completed hook")
 		if err := ds.onCompleteHook(sess.ctx, *sess.info, sess.meta); err != nil {
 			log.Errorf("completed hook error: %s", err)
 			return err
@@ -469,7 +468,6 @@ func (ds *Dsync) GetDagInfo(ctx context.Context, hash string, meta map[string]st
 	}
 
 	if ds.getDagInfoCheck != nil {
-		log.Errorf("get dag info check meta: %v", meta)
 		if err = ds.getDagInfoCheck(ctx, *info, meta); err != nil {
 			return nil, err
 		}

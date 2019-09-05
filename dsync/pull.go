@@ -15,6 +15,7 @@ import (
 func NewPull(cidStr string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem DagSyncable, meta map[string]string) (pull *Pull, err error) {
 	f := &Pull{
 		path:        cidStr,
+		meta:        meta,
 		lng:         lng,
 		bapi:        bapi,
 		remote:      rem,

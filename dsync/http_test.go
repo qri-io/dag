@@ -2,11 +2,13 @@ package dsync
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	files "github.com/ipfs/go-ipfs-files"
 	"github.com/qri-io/dag"
 )
@@ -110,4 +112,81 @@ func TestRemoveNotSupported(t *testing.T) {
 	if err := cli.RemoveCID(ctx, "foo", nil); err != ErrRemoveNotSupported {
 		t.Errorf("expected error remoce not supported, got: %s", err.Error())
 	}
+}
+
+func TestHooksMetaHTTP(t *testing.T) {
+	ctx, done := context.WithCancel(context.Background())
+	defer done()
+
+	nodeA, nodeB := mustNewLocalRemoteIPFSAPI(ctx)
+	cid := mustAddOneBlockDAG(nodeA)
+	ang, err := NewLocalNodeGetter(nodeA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aDsync, err := New(ang, nodeA.Block())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bng, err := NewLocalNodeGetter(nodeB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	check := map[string]string{
+		"hello":   "world",
+		"this is": "fun",
+	}
+
+	checkMeta := func(hookName string) Hook {
+		return func(_ context.Context, _ dag.Info, meta map[string]string) error {
+			if diff := cmp.Diff(check, meta); diff != "" {
+				t.Errorf("%s hook response mismatch (-want +got):\n%s", hookName, diff)
+			}
+			return nil
+		}
+	}
+
+	bAddr := ":9595"
+	remoteAddr := fmt.Sprintf("http://localhost%s/dsync", bAddr)
+
+	bDsync, err := New(bng, nodeB.Block(), func(cfg *Config) {
+		cfg.HTTPRemoteAddress = bAddr
+		cfg.AllowRemoves = true
+		cfg.PinAPI = nodeB.Pin()
+
+		cfg.PushPreCheck = checkMeta("PushPreCheck")
+		cfg.PushFinalCheck = checkMeta("PushFinalCheck")
+		cfg.PushComplete = checkMeta("PushComplete")
+		cfg.GetDagInfoCheck = checkMeta("GetDagInfoCheck")
+		cfg.RemoveCheck = checkMeta("RemoveCheck")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err = bDsync.StartRemote(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	push, err := aDsync.NewPush(cid.String(), remoteAddr, true)
+	push.SetMeta(check)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := push.Do(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	pull, err := aDsync.NewPull(cid.String(), remoteAddr, check)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := pull.Do(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// TODO (b5) - run a delete
 }

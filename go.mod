@@ -17,6 +17,7 @@ replace (
 )
 
 require (
+	github.com/google/go-cmp v0.2.0
 	github.com/ipfs/go-cid v0.0.2
 	github.com/ipfs/go-datastore v0.0.5
 	github.com/ipfs/go-ipfs v0.4.21

@@ -469,6 +469,7 @@ func (ds *Dsync) GetDagInfo(ctx context.Context, hash string, meta map[string]st
 	}
 
 	if ds.getDagInfoCheck != nil {
+		log.Errorf("get dag info check meta: %v", meta)
 		if err = ds.getDagInfoCheck(ctx, *info, meta); err != nil {
 			return nil, err
 		}

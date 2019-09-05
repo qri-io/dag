@@ -47,7 +47,7 @@ func ExampleNew() {
 	// Remote setup:
 	// setup the remote we're going to push to, starting by creating a local node
 	// getter
-	bLocalDS, err := NewLocalNodeGetter(nodeB)
+	bng, err := NewLocalNodeGetter(nodeB)
 	if err != nil {
 		panic(err)
 	}
@@ -56,7 +56,7 @@ func ExampleNew() {
 	bAddr := ":9595"
 
 	// create the remote instance, configuring it to accept DAGs
-	bDsync, err := New(bLocalDS, nodeB.Block(), func(cfg *Config) {
+	bDsync, err := New(bng, nodeB.Block(), func(cfg *Config) {
 		// configure the remote listening address:
 		cfg.HTTPRemoteAddress = bAddr
 

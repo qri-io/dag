@@ -15,8 +15,8 @@ import (
 	"github.com/ipfs/go-ipfs/keystore"
 	"github.com/ipfs/go-ipfs/repo"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
-	ci "github.com/libp2p/go-libp2p-crypto"
-	peer "github.com/libp2p/go-libp2p-peer"
+	ci "github.com/libp2p/go-libp2p-core/crypto"
+	peer "github.com/libp2p/go-libp2p-core/peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 )
@@ -39,7 +39,7 @@ func makeAPISwarm(ctx context.Context, fullIdentity bool, n int) ([]*core.IpfsNo
 	for i := 0; i < n; i++ {
 		var ident config.Identity
 		if fullIdentity {
-			sk, pk, err := ci.GenerateKeyPair(ci.RSA, 512)
+			sk, pk, err := ci.GenerateKeyPair(ci.RSA, 2048)
 			if err != nil {
 				return nil, nil, err
 			}

@@ -75,7 +75,7 @@ func (*DsyncPlugin) Version() string {
 }
 
 // Init initializes plugin, loading configuration details
-func (p *DsyncPlugin) Init() error {
+func (p *DsyncPlugin) Init(env *plugin.Environment) error {
 	if err := p.LoadConfig(); err != nil {
 		return err
 	}

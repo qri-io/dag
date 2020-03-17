@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"sync"
 
 	ipld "github.com/ipfs/go-ipld-format"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
@@ -23,6 +24,8 @@ type session struct {
 	diff   *dag.Manifest
 	prog   dag.Completion
 	progCh chan dag.Completion
+	lock   sync.Mutex
+	fin    bool
 }
 
 // newSession creates a receive state machine
@@ -97,6 +100,22 @@ func (s *session) Complete() bool {
 
 func (s *session) completionChanged() {
 	s.progCh <- s.prog
+}
+
+// IsFinalizedOnce will return true if the session is complete, but only the first time it is
+// called, even if multiple threads call this function at the same time
+func (s *session) IsFinalizedOnce() bool {
+	if !s.Complete() {
+		return false
+	}
+	ret := false
+	s.lock.Lock()
+	if !s.fin {
+		ret = true
+		s.fin = true
+	}
+	defer s.lock.Unlock()
+	return ret
 }
 
 // the best stack overflow answer evaarrr: https://stackoverflow.com/a/22892986/9416066

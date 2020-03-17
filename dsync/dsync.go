@@ -393,8 +393,8 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 	res := sess.ReceiveBlock(hash, bytes.NewReader(data))
 	log.Debugf("received block: %s", res.Hash)
 
-	// if we're done transferring, finalize!
-	if res.Status == StatusOk && sess.Complete() {
+	// check if transfer has completed, if so finalize it, but only once
+	if res.Status == StatusOk && sess.IsFinalizedOnce() {
 		if err := ds.finalizeReceive(sess); err != nil {
 			return ReceiveResponse{
 				Hash:   sess.info.RootCID().String(),

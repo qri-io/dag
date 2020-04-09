@@ -1,4 +1,4 @@
-version: '2'
+version: 2
 jobs:
   build:
     working_directory: /go/src/github.com/qri-io/dag
@@ -7,7 +7,6 @@ jobs:
     environment:
       TEST_RESULTS: /tmp/test-results
       GO111MODULE: "on"
-      GOPROXY: "https://proxy.golang.org"
     steps:
       - checkout
       - run: mkdir -p $TEST_RESULTS

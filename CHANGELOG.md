@@ -1,3 +1,14 @@
+<a name="v0.2.1"></a>
+# [v0.2.1](https://github.com/qri-io/dag/compare/v0.2.0...v0.2.1) (2020-06-29)
+
+
+### Bug Fixes
+
+* **dsync:** Don't call the finalize hook more than once ([e0b01c8](https://github.com/qri-io/dag/commit/e0b01c8))
+* **dsync pull:** send metadata when doing dync getDagInfo ([f42b963](https://github.com/qri-io/dag/commit/f42b963))
+
+
+
 # [v0.2.0](https://github.com/qri-io/dag/compare/v0.1.0...v0.2.0) (2019-09-04)
 
 # Overhauled Dsync with new API, P2P support, Push & Pull hooks

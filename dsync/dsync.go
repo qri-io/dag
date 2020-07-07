@@ -256,6 +256,7 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 	}
 
 	if cfg.Libp2pHost != nil {
+		log.Debug("dsync: adding p2p handler")
 		ds.p2pHandler = newp2pHandler(ds, cfg.Libp2pHost)
 	}
 
@@ -283,6 +284,7 @@ func (ds *Dsync) StartRemote(ctx context.Context) error {
 	}
 
 	if ds.p2pHandler != nil {
+		log.Debug("dsync: adding dsync protocol to the host")
 		ds.p2pHandler.host.SetStreamHandler(DsyncProtocolID, ds.p2pHandler.LibP2PStreamHandler)
 	}
 

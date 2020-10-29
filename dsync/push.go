@@ -89,6 +89,7 @@ func (snd *Push) SetMeta(meta map[string]string) {
 
 // Do executes the push, blocking until complete
 func (snd *Push) Do(ctx context.Context) (err error) {
+	log.Debugf("initiating push")
 	// how this process works:
 	// * Do sends a dag.Info to the remote node
 	// * The remote returns a session id for the push, and manifest of blocks to send
@@ -107,6 +108,7 @@ func (snd *Push) Do(ctx context.Context) (err error) {
 	// responses
 	snd.sid, snd.diff, err = snd.remote.NewReceiveSession(snd.info, snd.pinOnComplete, snd.meta)
 	if err != nil {
+		log.Debugf("error creating receive session: %s", err)
 		return err
 	}
 	log.Debugf("push has receive session: %s", snd.sid)
@@ -128,14 +130,13 @@ func (snd *Push) do(ctx context.Context) (err error) {
 		sends[i] = sender{
 			id:        i,
 			sid:       snd.sid,
-			ctx:       ctx,
 			blocksCh:  snd.blocksCh,
 			responses: snd.responses,
 			lng:       snd.lng,
 			remote:    snd.remote,
 			stopCh:    make(chan bool),
 		}
-		go sends[i].start()
+		go sends[i].start(ctx)
 	}
 
 	errCh := make(chan error)
@@ -146,7 +147,6 @@ func (snd *Push) do(ctx context.Context) (err error) {
 		// never block, so all responses are handled in their own goroutine
 		for res := range snd.responses {
 			go func(r ReceiveResponse) {
-				log.Debugf("push block response: %s. cid: %s", r.Status, r.Hash)
 				switch r.Status {
 				case StatusOk:
 					// this is the only place we should modify progress after creation
@@ -161,11 +161,13 @@ func (snd *Push) do(ctx context.Context) (err error) {
 						return
 					}
 				case StatusErrored:
+					log.Debugf("error pushing block. hash=%q error=%q", r.Hash, r.Err)
 					errCh <- r.Err
 					for _, s := range sends {
 						s.stop()
 					}
 				case StatusRetry:
+					log.Debugf("retrying push block. hash=%q error=%q", r.Hash, r.Err)
 					snd.retries <- r.Hash
 				}
 			}(res)
@@ -212,7 +214,6 @@ func (snd *Push) completionChanged() {
 type sender struct {
 	id        int
 	sid       string
-	ctx       context.Context
 	lng       ipld.NodeGetter
 	remote    DagSyncable
 	blocksCh  chan string
@@ -220,7 +221,7 @@ type sender struct {
 	stopCh    chan bool
 }
 
-func (s sender) start() {
+func (s sender) start(ctx context.Context) {
 	for {
 		select {
 		case hash := <-s.blocksCh:
@@ -232,13 +233,14 @@ func (s sender) start() {
 			go func() {
 				id, err := cid.Parse(hash)
 				if err != nil {
+					log.Debugf("error parsing sent block: %s", err)
 					s.responses <- ReceiveResponse{
 						Hash:   hash,
 						Status: StatusErrored,
 						Err:    err,
 					}
 				}
-				node, err := s.lng.Get(s.ctx, id)
+				node, err := s.lng.Get(ctx, id)
 				if err != nil {
 					s.responses <- ReceiveResponse{
 						Hash:   hash,
@@ -252,7 +254,8 @@ func (s sender) start() {
 
 		case <-s.stopCh:
 			return
-		case <-s.ctx.Done():
+		case <-ctx.Done():
+			log.Debugf("sender context done. err=%q", ctx.Err())
 			return
 		}
 	}

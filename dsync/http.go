@@ -5,23 +5,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 
-	"github.com/ipfs/go-cid"
-	ipld "github.com/ipfs/go-ipld-format"
+	format "github.com/ipfs/go-ipld-format"
+	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	protocol "github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/qri-io/dag"
 )
 
 const (
 	httpProtcolIDHeader = "dsync-version"
+	carArchiveMediaType = "archive/car"
+	cborMediaType       = "application/cbor"
+	sidHeader           = "sid"
 )
 
 // HTTPClient is the request side of doing dsync over HTTP
 type HTTPClient struct {
 	URL           string
+	NodeGetter    format.NodeGetter
+	BlockAPI      coreiface.BlockAPI
 	remProtocolID protocol.ID
 }
 
@@ -51,11 +57,12 @@ func (rem *HTTPClient) NewReceiveSession(info *dag.Info, pinOnComplete bool, met
 	}
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequest("POST", u.String(), buf)
+	req, err := http.NewRequest(http.MethodPost, u.String(), buf)
 	if err != nil {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(httpProtcolIDHeader, string(DsyncProtocolID))
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -73,15 +80,7 @@ func (rem *HTTPClient) NewReceiveSession(info *dag.Info, pinOnComplete bool, met
 
 	sid = res.Header.Get("sid")
 
-	protocolIDHeaderStr := res.Header.Get(httpProtcolIDHeader)
-	if protocolIDHeaderStr == "" {
-		// protocol ID header only exists in version 0.2.0 and up, when header isn't
-		// present assume version 0.1.1, the latest version before header was set
-		// 0.1.1 is wire-compatible with all lower versions of dsync
-		rem.remProtocolID = protocol.ID("/dsync/0.1.1")
-	} else {
-		rem.remProtocolID = protocol.ID(protocolIDHeaderStr)
-	}
+	rem.remProtocolID = protocolIDFromHTTPData(req.URL, res.Header)
 
 	diff = &dag.Manifest{}
 	err = json.NewDecoder(res.Body).Decode(diff)
@@ -98,19 +97,17 @@ func (rem *HTTPClient) ProtocolVersion() (protocol.ID, error) {
 	return rem.remProtocolID, nil
 }
 
-// PutBlocks streams a manifest of blocks to the remote in one HTTP call
-func (rem *HTTPClient) PutBlocks(ctx context.Context, sid string, ng ipld.NodeGetter, mfst *dag.Manifest, progCh chan cid.Cid) error {
-	r, err := NewManifestCARReader(ctx, ng, mfst, progCh)
-	if err != nil {
-		log.Debugf("err creating CARReader err=%q ", err)
-		return err
-	}
+// ReceiveBlocks writes a block stream as an HTTP PUT request to the remote
+func (rem *HTTPClient) ReceiveBlocks(ctx context.Context, sid string, r io.Reader) error {
 
-	req, err := http.NewRequest("PATCH", fmt.Sprintf("%s?sid=%s", rem.URL, sid), r)
+	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s?sid=%s", rem.URL, sid), r)
 	if err != nil {
-		log.Debugf("err creating PATCH HTTP request err=%q ", err)
+		log.Debugf("err creating %s HTTP request err=%q ", http.MethodPut, err)
 		return err
 	}
+	req.TransferEncoding = []string{"chunked"}
+	req.Header.Set("Content-Type", carArchiveMediaType)
+	req.Header.Set(httpProtcolIDHeader, string(DsyncProtocolID))
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -130,15 +127,10 @@ func (rem *HTTPClient) PutBlocks(ctx context.Context, sid string, ng ipld.NodeGe
 	return nil
 }
 
-// FetchBlocks streams a manifest of requested blocks
-func (rem *HTTPClient) FetchBlocks(ctx context.Context, sid string, mfst *dag.Manifest, progCh chan cid.Cid) error {
-	return fmt.Errorf("not implemented")
-}
-
 // ReceiveBlock asks a remote to receive a block over HTTP
 func (rem *HTTPClient) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 	url := fmt.Sprintf("%s?sid=%s&hash=%s", rem.URL, sid, hash)
-	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(data))
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(data))
 	if err != nil {
 		log.Debugf("http client create request error=%s", err)
 		return ReceiveResponse{
@@ -190,7 +182,7 @@ func (rem *HTTPClient) GetDagInfo(ctx context.Context, id string, meta map[strin
 	}
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequest("GET", u.String(), nil)
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +209,7 @@ func (rem *HTTPClient) GetDagInfo(ctx context.Context, id string, meta map[strin
 // GetBlock fetches a block from a remote source over HTTP
 func (rem *HTTPClient) GetBlock(ctx context.Context, id string) (data []byte, err error) {
 	url := fmt.Sprintf("%s?block=%s", rem.URL, id)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -239,6 +231,49 @@ func (rem *HTTPClient) GetBlock(ctx context.Context, id string) (data []byte, er
 	return ioutil.ReadAll(res.Body)
 }
 
+// OpenBlockStream sends a dag.Info to the remote & asks that it returns a
+// stream of blocks in the info's manifest
+func (rem *HTTPClient) OpenBlockStream(ctx context.Context, info *dag.Info, meta map[string]string) (io.ReadCloser, error) {
+	u, err := url.Parse(rem.URL)
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	for key, value := range meta {
+		q.Add(key, value)
+	}
+	u.RawQuery = q.Encode()
+
+	bodyData, err := info.MarshalCBOR()
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, u.String(), bytes.NewBuffer(bodyData))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", cborMediaType)
+	req.Header.Set("Accept", carArchiveMediaType)
+	req.Header.Set(httpProtcolIDHeader, string(DsyncProtocolID))
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if res.StatusCode != http.StatusOK {
+		body, _ := ioutil.ReadAll(res.Body)
+		return nil, fmt.Errorf("unexpected HTTP response: %d: %q", res.StatusCode, string(body))
+	}
+
+	if res.Header.Get("Content-Type") != carArchiveMediaType {
+		return nil, fmt.Errorf("unexpected media type: %s", res.Header.Get("Content-Type"))
+	}
+
+	return res.Body, nil
+}
+
 // RemoveCID asks a remote to remove a CID
 func (rem *HTTPClient) RemoveCID(ctx context.Context, id string, meta map[string]string) (err error) {
 	u, err := url.Parse(rem.URL)
@@ -252,7 +287,7 @@ func (rem *HTTPClient) RemoveCID(ctx context.Context, id string, meta map[string
 	}
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequest("DELETE", u.String(), nil)
+	req, err := http.NewRequest(http.MethodDelete, u.String(), nil)
 	if err != nil {
 		return err
 	}
@@ -280,68 +315,24 @@ func (rem *HTTPClient) RemoveCID(ctx context.Context, id string, meta map[string
 // that interlocks with methods exposed by HTTPClient
 func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(httpProtcolIDHeader, string(DsyncProtocolID))
+
 		switch r.Method {
-		case "POST":
-			info := &dag.Info{}
-			if err := json.NewDecoder(r.Body).Decode(info); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(err.Error()))
-				return
-			}
-			r.Body.Close()
-
-			if info == nil {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte("body must be a json dag info object"))
-				return
-			}
-
-			pinOnComplete := r.FormValue("pin") == "true"
-			meta := map[string]string{}
-			for key := range r.URL.Query() {
-				if key != "pin" {
-					meta[key] = r.URL.Query().Get(key)
+		case http.MethodPost:
+			createDsyncSession(ds, w, r)
+		case http.MethodPut:
+			if r.Header.Get("Content-Type") == carArchiveMediaType {
+				if err := ds.ReceiveBlocks(r.Context(), r.FormValue("sid"), r.Body); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(err.Error()))
+					return
 				}
-			}
-
-			sid, diff, err := ds.NewReceiveSession(info, pinOnComplete, meta)
-			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(err.Error()))
-				return
-			}
-
-			w.Header().Set(httpProtcolIDHeader, string(DsyncProtocolID))
-			w.Header().Set("sid", sid)
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(diff)
-		case "PUT":
-			data, err := ioutil.ReadAll(r.Body)
-			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(err.Error()))
-				return
-			}
-
-			res := ds.ReceiveBlock(r.FormValue("sid"), r.FormValue("hash"), data)
-
-			if res.Status == StatusErrored {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(res.Err.Error()))
-			} else if res.Status == StatusRetry {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(res.Err.Error()))
-			} else {
 				w.WriteHeader(http.StatusOK)
-			}
-		case "PATCH":
-			if err := ds.ReceiveBlocks(r.Context(), r.FormValue("sid"), r.Body); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(err.Error()))
 				return
 			}
-			w.WriteHeader(http.StatusOK)
-		case "GET":
+
+			receiveBlockHTTP(ds, w, r)
+		case http.MethodGet:
 			mfstID := r.FormValue("manifest")
 			blockID := r.FormValue("block")
 			if mfstID == "" && blockID == "" {
@@ -382,7 +373,32 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 				w.Header().Set("Content-Type", "application/octet-stream")
 				w.Write(data)
 			}
-		case "DELETE":
+		case http.MethodPatch:
+			meta := map[string]string{}
+			for key := range r.URL.Query() {
+				meta[key] = r.URL.Query().Get(key)
+			}
+
+			info, err := decodeDAGInfoBody(r)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(err.Error()))
+				return
+			}
+			r, err := ds.OpenBlockStream(r.Context(), info, meta)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(err.Error()))
+				return
+			}
+
+			w.Header().Set("Content-Type", carArchiveMediaType)
+			w.WriteHeader(http.StatusOK)
+			defer r.Close()
+			io.Copy(w, r)
+			return
+
+		case http.MethodDelete:
 			cid := r.FormValue("cid")
 			meta := map[string]string{}
 			for key := range r.URL.Query() {
@@ -400,4 +416,94 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 			w.WriteHeader(http.StatusOK)
 		}
 	}
+}
+
+func protocolIDFromHTTPData(url *url.URL, headers http.Header) protocol.ID {
+	protocolIDHeaderStr := headers.Get(httpProtcolIDHeader)
+	if protocolIDHeaderStr == "" {
+		// protocol ID header only exists in version 0.2.0 and up, when header isn't
+		// present assume version 0.1.1, the latest version before header was set
+		// 0.1.1 is wire-compatible with all lower versions of dsync
+		return protocol.ID("/dsync/0.1.1")
+	}
+
+	return protocol.ID(protocolIDHeaderStr)
+}
+
+func decodeDAGInfoBody(r *http.Request) (*dag.Info, error) {
+	defer r.Body.Close()
+	info := &dag.Info{}
+
+	switch r.Header.Get("Content-Type") {
+	case cborMediaType:
+		data, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		info, err = dag.UnmarshalCBORDagInfo(data)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		// default to JSON for legacy reads
+		err := json.NewDecoder(r.Body).Decode(info)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if info.Manifest == nil {
+		return nil, fmt.Errorf("body must be a json dag info object")
+	}
+
+	return info, nil
+}
+
+func receiveBlockHTTP(ds *Dsync, w http.ResponseWriter, r *http.Request) {
+	data, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	res := ds.ReceiveBlock(r.FormValue("sid"), r.FormValue("hash"), data)
+
+	if res.Status == StatusErrored {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(res.Err.Error()))
+	} else if res.Status == StatusRetry {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(res.Err.Error()))
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func createDsyncSession(ds *Dsync, w http.ResponseWriter, r *http.Request) {
+	info, err := decodeDAGInfoBody(r)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	pinOnComplete := r.FormValue("pin") == "true"
+	meta := map[string]string{}
+	for key := range r.URL.Query() {
+		if key != "pin" {
+			meta[key] = r.URL.Query().Get(key)
+		}
+	}
+
+	sid, diff, err := ds.NewReceiveSession(info, pinOnComplete, meta)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	w.Header().Set(sidHeader, sid)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(diff)
 }

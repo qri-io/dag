@@ -130,24 +130,30 @@ func (snd *Push) do(ctx context.Context) (err error) {
 	}
 
 	if protocolSupportsDagStreaming(protoID) {
-		progCh := make(chan cid.Cid)
-
-		go func() {
-			for id := range progCh {
-				// this is the only place we should modify progress after creation
-				idStr := id.String()
-				log.Debugf("sent block %s", idStr)
-				for i, hash := range snd.info.Manifest.Nodes {
-					if idStr == hash {
-						snd.prog[i] = 100
-					}
-				}
-				go snd.completionChanged()
-			}
-		}()
-
 		if str, ok := snd.remote.(DagStreamable); ok {
-			return str.PutBlocks(ctx, snd.sid, snd.lng, snd.diff, progCh)
+			progCh := make(chan cid.Cid)
+
+			go func() {
+				for id := range progCh {
+					// this is the only place we should modify progress after creation
+					idStr := id.String()
+					log.Debugf("sent block %s", idStr)
+					for i, hash := range snd.info.Manifest.Nodes {
+						if idStr == hash {
+							snd.prog[i] = 100
+						}
+					}
+					go snd.completionChanged()
+				}
+			}()
+
+			r, err := NewManifestCARReader(ctx, snd.lng, snd.diff, progCh)
+			if err != nil {
+				log.Debugf("err creating CARReader err=%q ", err)
+				return err
+			}
+
+			return str.ReceiveBlocks(ctx, snd.sid, r)
 		}
 	}
 

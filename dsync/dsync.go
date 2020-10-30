@@ -149,6 +149,9 @@ type Dsync struct {
 	// getDagInfoCheck is an optional hook to call when a client asks for a dag
 	// info
 	getDagInfoCheck Hook
+	// openBlockStreamCheck is an optional hook to call when a client asks to pull
+	// a stream of one or more blocks
+	openBlockStreamCheck Hook
 	// removeCheck is an optional hook to call before allowing a delete
 	removeCheck Hook
 
@@ -159,8 +162,12 @@ type Dsync struct {
 	sessionTTLDur  time.Duration
 }
 
-// compile-time assertion that Dsync satisfies the remote interface
-var _ DagSyncable = (*Dsync)(nil)
+var (
+	// compile-time assertion that Dsync satisfies the remote interface
+	_ DagSyncable = (*Dsync)(nil)
+	// compile-time assertion that Dsync satisfies streaming interfaces
+	_ DagStreamable = (*Dsync)(nil)
+)
 
 // Config encapsulates optional Dsync configuration
 type Config struct {
@@ -192,6 +199,8 @@ type Config struct {
 	PushComplete Hook
 	// optional check to run on dagInfo requests before sending an info back
 	GetDagInfoCheck Hook
+	// optional hook to run before allowing a stream of blocks
+	OpenBlockStreamCheck Hook
 	// optional check to run before executing a remove operation
 	// the dag.Info given to this check will only contain the root CID being
 	// removed
@@ -242,11 +251,12 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 		requireAllBlocks: cfg.RequireAllBlocks,
 		allowRemoves:     cfg.AllowRemoves,
 
-		preCheck:        cfg.PushPreCheck,
-		finalCheck:      cfg.PushFinalCheck,
-		onCompleteHook:  cfg.PushComplete,
-		getDagInfoCheck: cfg.GetDagInfoCheck,
-		removeCheck:     cfg.RemoveCheck,
+		preCheck:             cfg.PushPreCheck,
+		finalCheck:           cfg.PushFinalCheck,
+		onCompleteHook:       cfg.PushComplete,
+		getDagInfoCheck:      cfg.GetDagInfoCheck,
+		openBlockStreamCheck: cfg.OpenBlockStreamCheck,
+		removeCheck:          cfg.RemoveCheck,
 
 		sessionPool:    map[string]*session{},
 		sessionCancels: map[string]context.CancelFunc{},
@@ -367,8 +377,6 @@ func (ds *Dsync) NewPull(cidStr, remoteAddr string, meta map[string]string) (*Pu
 // transfer session. It returns a manifest/diff of the blocks the reciever needs
 // to have a complete DAG new sessions are created with a deadline for completion
 func (ds *Dsync) NewReceiveSession(info *dag.Info, pinOnComplete bool, meta map[string]string) (sid string, diff *dag.Manifest, err error) {
-
-	// TODO (b5) - figure out context passing
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(ds.sessionTTLDur))
 
 	if err = ds.preCheck(ctx, *info, meta); err != nil {
@@ -526,6 +534,22 @@ func (ds *Dsync) GetBlock(ctx context.Context, hash string) ([]byte, error) {
 	}
 
 	return ioutil.ReadAll(rdr)
+}
+
+// OpenBlockStream creates a block stream of the contents of the dag.Info
+func (ds *Dsync) OpenBlockStream(ctx context.Context, info *dag.Info, meta map[string]string) (io.ReadCloser, error) {
+	if ds.openBlockStreamCheck != nil {
+		if err := ds.openBlockStreamCheck(ctx, *info, meta); err != nil {
+			return nil, err
+		}
+	}
+
+	rdr, err := NewManifestCARReader(ctx, ds.lng, info.Manifest, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return ioutil.NopCloser(rdr), nil
 }
 
 // RemoveCID unpins a CID if removes are enabled, does not immideately remove

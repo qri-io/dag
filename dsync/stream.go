@@ -3,7 +3,6 @@ package dsync
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -20,8 +19,11 @@ import (
 // DagStreamable is an interface for sending and fetching all blocks in a given
 // manifest in one trip
 type DagStreamable interface {
-	PutBlocks(ctx context.Context, sid string, ng ipld.NodeGetter, mfst *dag.Manifest, progCh chan cid.Cid) error
-	FetchBlocks(ctx context.Context, sid string, mfst *dag.Manifest, progCh chan cid.Cid) error
+	// ReceiveBlocks asks a remote to accept a stream of blocks from a local
+	// client, this can only happen within a push session
+	ReceiveBlocks(ctx context.Context, sessionID string, r io.Reader) error
+	// OpenBlockStream asks a remote to generate a block stream
+	OpenBlockStream(ctx context.Context, info *dag.Info, meta map[string]string) (io.ReadCloser, error)
 }
 
 func protocolSupportsDagStreaming(pid protocol.ID) bool {
@@ -83,22 +85,22 @@ func NewManifestCARReader(ctx context.Context, ng ipld.NodeGetter, mfst *dag.Man
 	}
 
 	str := &mfstCarReader{
-		ctx:    ctx,
-		cids:   cids,
-		ng:     ng,
-		buf:    buf,
-		progCh: progCh,
+		ctx:      ctx,
+		cids:     cids,
+		buf:      buf,
+		progCh:   progCh,
+		blocksCh: ng.GetMany(ctx, cids),
 	}
 	return str, nil
 }
 
 type mfstCarReader struct {
-	i      int
-	ctx    context.Context
-	cids   []cid.Cid
-	ng     ipld.NodeGetter
-	buf    *bytes.Buffer
-	progCh chan cid.Cid
+	i        int
+	ctx      context.Context
+	cids     []cid.Cid
+	buf      *bytes.Buffer
+	progCh   chan cid.Cid
+	blocksCh <-chan *ipld.NodeOption
 }
 
 func (str *mfstCarReader) Read(p []byte) (int, error) {
@@ -126,19 +128,20 @@ func (str *mfstCarReader) readBlock() error {
 	if str.i == len(str.cids) {
 		return io.EOF
 	}
-	nd, err := str.ng.Get(str.ctx, str.cids[str.i])
-	if err != nil {
-		fmt.Printf("error getting block: %s\n", err)
-		return err
+
+	no := <-str.blocksCh
+	if no.Err != nil {
+		log.Debugf("error getting block: err=%q", no.Err)
+		return no.Err
 	}
 
 	str.i++
-	if err = carutil.LdWrite(str.buf, nd.Cid().Bytes(), nd.RawData()); err != nil {
+	if err := carutil.LdWrite(str.buf, no.Node.Cid().Bytes(), no.Node.RawData()); err != nil {
 		return err
 	}
 
 	if str.progCh != nil {
-		go func() { str.progCh <- nd.Cid() }()
+		go func() { str.progCh <- no.Node.Cid() }()
 	}
 
 	return nil

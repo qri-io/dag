@@ -90,6 +90,14 @@ func TestSyncHTTP(t *testing.T) {
 	}
 
 	<-removeCheckCalled
+
+	r, err := cli.OpenBlockStream(ctx, info, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ioutil.ReadAll(r); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRemoveNotSupported(t *testing.T) {
@@ -161,6 +169,7 @@ func TestHooksMetaHTTP(t *testing.T) {
 		cfg.PushFinalCheck = checkMeta("PushFinalCheck")
 		cfg.PushComplete = checkMeta("PushComplete")
 		cfg.GetDagInfoCheck = checkMeta("GetDagInfoCheck")
+		cfg.OpenBlockStreamCheck = checkMeta("OpenBlockStreamCheck")
 		cfg.RemoveCheck = checkMeta("RemoveCheck")
 	})
 	if err != nil {

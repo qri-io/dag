@@ -15,10 +15,11 @@ import (
 
 // session tracks the state of a transfer
 type session struct {
+	ctx  context.Context
+	lng  ipld.NodeGetter
+	bapi coreiface.BlockAPI
+
 	id     string
-	ctx    context.Context
-	lng    ipld.NodeGetter
-	bapi   coreiface.BlockAPI
 	pin    bool
 	meta   map[string]string
 	info   *dag.Info
@@ -36,6 +37,7 @@ func newSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAP
 	if calcBlockDiff {
 		log.Debug("calculating block diff")
 		if diff, err = dag.Missing(ctx, lng, info.Manifest); err != nil {
+			log.Debugf("error calculating diff err=%q", err)
 			return nil, err
 		}
 	}
@@ -100,7 +102,6 @@ func (s *session) ReceiveBlocks(ctx context.Context, r io.Reader) error {
 	go func() {
 		for id := range progCh {
 			idStr := id.String()
-			// this should be the only place that modifies progress
 			for i, h := range s.info.Manifest.Nodes {
 				if idStr == h {
 					s.prog[i] = 100
@@ -164,3 +165,18 @@ func randStringBytesMask(n int) string {
 
 	return string(b)
 }
+
+// type blockApiHaser struct {
+// 	bapi coreiface.BlockAPI
+// }
+
+// func (bh blockApiHaser) Has(id cid.Cid) (bool, error) {
+// 	st, err := bh.bapi.Stat(context.Background(), path.IpfsPath(id))
+// 	if errors.Is() {
+
+// 	}
+// }
+
+// func NewBlockAPIHaser(bapi coreiface.BlockAPI) dag.BlockHaser {
+
+// }

@@ -12,6 +12,7 @@ require (
 	github.com/ipfs/go-ipld-format v0.2.0
 	github.com/ipfs/go-log v1.0.4
 	github.com/ipfs/interface-go-ipfs-core v0.3.0
+	github.com/ipld/go-car v0.1.0
 	github.com/libp2p/go-libp2p v0.11.0
 	github.com/libp2p/go-libp2p-core v0.6.1
 	github.com/libp2p/go-libp2p-peerstore v0.2.6

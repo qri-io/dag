@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -30,10 +31,15 @@ import (
 	path "github.com/ipfs/interface-go-ipfs-core/path"
 	host "github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
+	protocol "github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/qri-io/dag"
 )
 
 var log = golog.Logger("dsync")
+
+func init() {
+	golog.SetLogLevel("dsync", "debug")
+}
 
 const (
 	// default to parallelism of 3. So far 4 was enough to blow up a std k8s pod running IPFS :(
@@ -47,6 +53,16 @@ const (
 	maxRetries = 80
 )
 
+var (
+	// ErrRemoveNotSupported is the error value returned by remotes that don't
+	// support delete operations
+	ErrRemoveNotSupported = fmt.Errorf("remove is not supported")
+	// ErrUnknownProtocolVersion is the error for when the version of the remote
+	// protocol is unknown, usually because the handshake with the the remote
+	// hasn't happened yet
+	ErrUnknownProtocolVersion = fmt.Errorf("unknown protocol version")
+)
+
 // DagSyncable is a source that can be synced to & from. dsync requests automate
 // calls to this interface with higher-order functions like Push and Pull
 //
@@ -58,24 +74,23 @@ type DagSyncable interface {
 	// The remote will return a delta manifest of blocks the remote needs
 	// and a session id that must be sent with each block
 	NewReceiveSession(info *dag.Info, pinOnComplete bool, meta map[string]string) (sid string, diff *dag.Manifest, err error)
+	// ProtocolVersion indicates the version of dsync the remote speaks, only
+	// available after a handshake is established. Calling this method before a
+	// handshake must return ErrUnknownProtocolVersion
+	ProtocolVersion() (protocol.ID, error)
+
 	// ReceiveBlock places a block on the remote
 	ReceiveBlock(sid, hash string, data []byte) ReceiveResponse
-
 	// GetDagInfo asks the remote for info specified by a the root identifier
 	// string of a DAG
 	GetDagInfo(ctx context.Context, cidStr string, meta map[string]string) (info *dag.Info, err error)
 	// GetBlock gets a block of data from the remote
 	GetBlock(ctx context.Context, hash string) (rawdata []byte, err error)
-
 	// RemoveCID asks the remote to remove a cid. Supporting deletes are optional.
 	// DagSyncables that don't implement DeleteCID must return
 	// ErrDeleteNotSupported
 	RemoveCID(ctx context.Context, cidStr string, meta map[string]string) (err error)
 }
-
-// ErrRemoveNotSupported is the error value returned by remotes that don't
-// support delete operations
-var ErrRemoveNotSupported = fmt.Errorf("remove is not supported")
 
 // Hook is a function that a dsync instance will call at specified points in the
 // sync lifecycle
@@ -263,6 +278,11 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 	return ds, nil
 }
 
+// ProtocolVersion reports the current procotol version for dsync
+func (ds *Dsync) ProtocolVersion() (protocol.ID, error) {
+	return DsyncProtocolID, nil
+}
+
 // StartRemote makes dsync available for remote requests, starting an HTTP
 // server if a listening address is specified.
 // StartRemote returns immediately. Stop remote service by cancelling
@@ -387,13 +407,12 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 		return ReceiveResponse{
 			Hash:   hash,
 			Status: StatusErrored,
-			Err:    fmt.Errorf("sid '%s' not found", sid),
+			Err:    fmt.Errorf("sid %q not found", sid),
 		}
 	}
 
 	// ReceiveBlock accepts a block from the sender, placing it in the local blockstore
 	res := sess.ReceiveBlock(hash, bytes.NewReader(data))
-	log.Debugf("received block: %s", res.Hash)
 
 	// check if transfer has completed, if so finalize it, but only once
 	if res.Status == StatusOk && sess.IsFinalizedOnce() {
@@ -407,6 +426,27 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 	}
 
 	return res
+}
+
+// ReceiveBlocks ingests blocks being pushed into the local store
+func (ds *Dsync) ReceiveBlocks(ctx context.Context, sid string, r io.Reader) error {
+	sess, ok := ds.sessionPool[sid]
+	if !ok {
+		log.Debugf("couldn't find session. sid=%q", sid)
+		return fmt.Errorf("sid %q not found", sid)
+	}
+
+	if err := sess.ReceiveBlocks(ctx, r); err != nil {
+		log.Debugf("error receiving blocks. err=%q", err)
+		return err
+	}
+
+	if err := ds.finalizeReceive(sess); err != nil {
+		log.Debugf("error finalizing receive. err=%q", err)
+		return err
+	}
+
+	return nil
 }
 
 // TODO (b5): needs to be called if someone tries to sync a DAG that requires

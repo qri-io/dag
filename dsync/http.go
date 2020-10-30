@@ -9,17 +9,28 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/ipfs/go-cid"
+	ipld "github.com/ipfs/go-ipld-format"
+	protocol "github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/qri-io/dag"
+)
+
+const (
+	httpProtcolIDHeader = "dsync-version"
 )
 
 // HTTPClient is the request side of doing dsync over HTTP
 type HTTPClient struct {
-	URL string
+	URL           string
+	remProtocolID protocol.ID
 }
 
-// HTTPClient exists to satisfy the DaySyncable interface on the client side
-// of a transfer
-var _ DagSyncable = (*HTTPClient)(nil)
+var (
+	// HTTPClient exists to satisfy the DaySyncable interface on the client side
+	// of a transfer
+	_ DagSyncable   = (*HTTPClient)(nil)
+	_ DagStreamable = (*HTTPClient)(nil)
+)
 
 // NewReceiveSession initiates a session for pushing blocks to a remote.
 // It sends a Manifest to a remote source over HTTP
@@ -61,10 +72,67 @@ func (rem *HTTPClient) NewReceiveSession(info *dag.Info, pinOnComplete bool, met
 	}
 
 	sid = res.Header.Get("sid")
+
+	protocolIDHeaderStr := res.Header.Get(httpProtcolIDHeader)
+	if protocolIDHeaderStr == "" {
+		// protocol ID header only exists in version 0.2.0 and up, when header isn't
+		// present assume version 0.1.1, the latest version before header was set
+		// 0.1.1 is wire-compatible with all lower versions of dsync
+		rem.remProtocolID = protocol.ID("/dsync/0.1.1")
+	} else {
+		rem.remProtocolID = protocol.ID(protocolIDHeaderStr)
+	}
+
 	diff = &dag.Manifest{}
 	err = json.NewDecoder(res.Body).Decode(diff)
 
 	return
+}
+
+// ProtocolVersion indicates the version of dsync the remote speaks, only
+// available after a handshake is established
+func (rem *HTTPClient) ProtocolVersion() (protocol.ID, error) {
+	if string(rem.remProtocolID) == "" {
+		return "", ErrUnknownProtocolVersion
+	}
+	return rem.remProtocolID, nil
+}
+
+// PutBlocks streams a manifest of blocks to the remote in one HTTP call
+func (rem *HTTPClient) PutBlocks(ctx context.Context, sid string, ng ipld.NodeGetter, mfst *dag.Manifest, progCh chan cid.Cid) error {
+	r, err := NewManifestCARReader(ctx, ng, mfst, progCh)
+	if err != nil {
+		log.Debugf("err creating CARReader err=%q ", err)
+		return err
+	}
+
+	req, err := http.NewRequest("PATCH", fmt.Sprintf("%s?sid=%s", rem.URL, sid), r)
+	if err != nil {
+		log.Debugf("err creating PATCH HTTP request err=%q ", err)
+		return err
+	}
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Debugf("err doing HTTP request. err=%q", err)
+		return err
+	}
+
+	if res.StatusCode != http.StatusOK {
+		var msg string
+		if data, err := ioutil.ReadAll(res.Body); err == nil {
+			msg = string(data)
+		}
+		log.Debugf("error response from remote. err=%q", msg)
+		return fmt.Errorf("remote response: %d %s", res.StatusCode, msg)
+	}
+
+	return nil
+}
+
+// FetchBlocks streams a manifest of requested blocks
+func (rem *HTTPClient) FetchBlocks(ctx context.Context, sid string, mfst *dag.Manifest, progCh chan cid.Cid) error {
+	return fmt.Errorf("not implemented")
 }
 
 // ReceiveBlock asks a remote to receive a block over HTTP
@@ -243,10 +311,10 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 				return
 			}
 
+			w.Header().Set(httpProtcolIDHeader, string(DsyncProtocolID))
 			w.Header().Set("sid", sid)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(diff)
-
 		case "PUT":
 			data, err := ioutil.ReadAll(r.Body)
 			if err != nil {
@@ -266,6 +334,13 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 			} else {
 				w.WriteHeader(http.StatusOK)
 			}
+		case "PATCH":
+			if err := ds.ReceiveBlocks(r.Context(), r.FormValue("sid"), r.Body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(err.Error()))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
 		case "GET":
 			mfstID := r.FormValue("manifest")
 			blockID := r.FormValue("block")

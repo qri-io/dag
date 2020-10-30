@@ -15,10 +15,8 @@ import (
 )
 
 const (
-	// DsyncProtocolID is the dsyc p2p Protocol Identifier
-	DsyncProtocolID = protocol.ID("/dsync")
-	// DsyncServiceTag tags the type & version of the dsync service
-	DsyncServiceTag = "dsync/0.1.1-dev"
+	// DsyncProtocolID is the dsyc p2p Protocol Identifier & version tag
+	DsyncProtocolID = protocol.ID("/dsync/0.2.0")
 	// default value to give qri peer connections in connmanager, one hunnit
 	dsyncSupportValue = 100
 )
@@ -67,6 +65,15 @@ func (c *p2pClient) NewReceiveSession(info *dag.Info, pinOnComplete bool, meta m
 	diff, err = dag.UnmarshalCBORManifest(res.Body)
 	log.Debugf("received pin pessage from %s", c.remotePeerID)
 	return sid, diff, err
+}
+
+// ProtocolVersion indicates the version of dsync the remote speaks, only
+// available after a handshake is established
+func (c *p2pClient) ProtocolVersion() (protocol.ID, error) {
+	if string(c.remoteProtocolID) == "" {
+		return "", ErrUnknownProtocolVersion
+	}
+	return c.remoteProtocolID, nil
 }
 
 // ReceiveBlock places a block on the remote
@@ -162,9 +169,10 @@ func (c *p2pClient) RemoveCID(ctx context.Context, cidStr string, meta map[strin
 
 // p2pHandler implements dsync as a libp2p protocol handler
 type p2pHandler struct {
-	dsync    *Dsync
-	host     host.Host
-	handlers map[p2putil.MsgType]p2putil.HandlerFunc
+	dsync            *Dsync
+	host             host.Host
+	handlers         map[p2putil.MsgType]p2putil.HandlerFunc
+	remoteProtocolID protocol.ID
 }
 
 // newp2pHandler creates a p2p remote stream handler from a dsync.Remote
@@ -191,6 +199,7 @@ func (c *p2pHandler) sendMessage(ctx context.Context, msg p2putil.Message, pid p
 	if err != nil {
 		return p2putil.Message{}, fmt.Errorf("error opening stream: %s", err.Error())
 	}
+	c.remoteProtocolID = s.Protocol()
 	defer s.Close()
 
 	// now that we have a confirmed working connection

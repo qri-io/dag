@@ -26,8 +26,8 @@ func TestSyncHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// yooooooooooooooooooooo
-	f := files.NewReaderFile(ioutil.NopCloser(strings.NewReader("y" + strings.Repeat("o", 350))))
+	// yooooooooooooooooooooo...
+	f := files.NewReaderFile(ioutil.NopCloser(strings.NewReader("y" + strings.Repeat("o", 3500000))))
 	path, err := a.Unixfs().Add(ctx, f)
 	if err != nil {
 		t.Fatal(err)
@@ -67,13 +67,14 @@ func TestSyncHTTP(t *testing.T) {
 
 	cli := &HTTPClient{URL: s.URL + "/dsync"}
 
+	fmt.Printf("pushing %#v\n", info.Manifest.Nodes)
 	push, err := NewPush(aGetter, info, cli, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if err := push.Do(ctx); err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	// b should now be able to generate a manifest
@@ -85,7 +86,7 @@ func TestSyncHTTP(t *testing.T) {
 	<-onCompleteCalled
 
 	if err := cli.RemoveCID(ctx, info.RootCID().String(), nil); err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	<-removeCheckCalled

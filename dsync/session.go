@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"sync"
 
+	"github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	"github.com/qri-io/dag"
@@ -91,6 +92,26 @@ func (s *session) ReceiveBlock(hash string, data io.Reader) ReceiveResponse {
 		Hash:   hash,
 		Status: StatusOk,
 	}
+}
+
+func (s *session) ReceiveBlocks(ctx context.Context, r io.Reader) error {
+	progCh := make(chan cid.Cid)
+
+	go func() {
+		for id := range progCh {
+			idStr := id.String()
+			// this should be the only place that modifies progress
+			for i, h := range s.info.Manifest.Nodes {
+				if idStr == h {
+					s.prog[i] = 100
+				}
+			}
+			go s.completionChanged()
+		}
+	}()
+
+	_, err := AddAllFromCARReader(ctx, s.bapi, r, progCh)
+	return err
 }
 
 // Complete returns if this receive session is finished or not

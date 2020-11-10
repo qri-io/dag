@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	httpProtcolIDHeader = "dsync-version"
-	sidHeader           = "sid"
+	httpDsyncProtocolIDHeader = "dsync-version"
+	sidHeader                 = "sid"
 )
 
 const (
@@ -68,7 +68,7 @@ func (rem *HTTPClient) NewReceiveSession(info *dag.Info, pinOnComplete bool, met
 	}
 	req.Header.Set("Content-Type", jsonMIMEType)
 	req.Header.Set("Accept", jsonMIMEType)
-	req.Header.Set(httpProtcolIDHeader, string(DsyncProtocolID))
+	req.Header.Set(httpDsyncProtocolIDHeader, string(DsyncProtocolID))
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -85,7 +85,6 @@ func (rem *HTTPClient) NewReceiveSession(info *dag.Info, pinOnComplete bool, met
 	}
 
 	sid = res.Header.Get("sid")
-
 	rem.remProtocolID = protocolIDFromHTTPData(req.URL, res.Header)
 
 	diff = &dag.Manifest{}
@@ -115,7 +114,7 @@ func (rem *HTTPClient) ReceiveBlocks(ctx context.Context, sid string, r io.Reade
 	req.Header.Set("Content-Type", carMIMEType)
 	// response body is only used for error reporting
 	req.Header.Set("Accept", binaryMIMEType)
-	req.Header.Set(httpProtcolIDHeader, string(DsyncProtocolID))
+	req.Header.Set(httpDsyncProtocolIDHeader, string(DsyncProtocolID))
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -202,6 +201,7 @@ func (rem *HTTPClient) GetDagInfo(ctx context.Context, id string, meta map[strin
 	if err != nil {
 		return nil, err
 	}
+	rem.remProtocolID = protocolIDFromHTTPData(req.URL, res.Header)
 
 	if res.StatusCode != http.StatusOK {
 		var msg string
@@ -267,7 +267,7 @@ func (rem *HTTPClient) OpenBlockStream(ctx context.Context, info *dag.Info, meta
 	}
 	req.Header.Set("Content-Type", cborMIMEType)
 	req.Header.Set("Accept", carMIMEType)
-	req.Header.Set(httpProtcolIDHeader, string(DsyncProtocolID))
+	req.Header.Set(httpDsyncProtocolIDHeader, string(DsyncProtocolID))
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -329,7 +329,7 @@ func (rem *HTTPClient) RemoveCID(ctx context.Context, id string, meta map[string
 // that interlocks with methods exposed by HTTPClient
 func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(httpProtcolIDHeader, string(DsyncProtocolID))
+		w.Header().Set(httpDsyncProtocolIDHeader, string(DsyncProtocolID))
 
 		switch r.Method {
 		case http.MethodPost:
@@ -433,14 +433,13 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 }
 
 func protocolIDFromHTTPData(url *url.URL, headers http.Header) protocol.ID {
-	protocolIDHeaderStr := headers.Get(httpProtcolIDHeader)
+	protocolIDHeaderStr := headers.Get(httpDsyncProtocolIDHeader)
 	if protocolIDHeaderStr == "" {
 		// protocol ID header only exists in version 0.2.0 and up, when header isn't
 		// present assume version 0.1.1, the latest version before header was set
 		// 0.1.1 is wire-compatible with all lower versions of dsync
 		return protocol.ID("/dsync/0.1.1")
 	}
-
 	return protocol.ID(protocolIDHeaderStr)
 }
 

@@ -157,6 +157,8 @@ func (snd *Push) do(ctx context.Context) (err error) {
 		}
 	}
 
+	log.Debugf("protocol doesn't support block streaming. falling back to pushing per-block strategy")
+
 	// create senders
 	sends := make([]sender, snd.parallelism)
 	for i := 0; i < snd.parallelism; i++ {

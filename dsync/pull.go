@@ -138,6 +138,8 @@ func (f *Pull) do(ctx context.Context) error {
 		log.Debugf("protocol supports streaming but doesn't have the streamable interface: %T %v", f.remote, f.remote)
 	}
 
+	log.Debugf("protocol doesn't support block streaming. falling back to pulling per-block strategy")
+
 	if len(f.diff.Nodes) < f.parallelism {
 		f.parallelism = len(f.diff.Nodes)
 	}

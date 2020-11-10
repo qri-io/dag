@@ -42,6 +42,8 @@ func init() {
 }
 
 const (
+	// DsyncProtocolID is the dsyc p2p Protocol Identifier & version tag
+	DsyncProtocolID = protocol.ID("/dsync/0.2.0")
 	// default to parallelism of 3. So far 4 was enough to blow up a std k8s pod running IPFS :(
 	defaultPushParallelism = 1
 	// default to parallelism of 3

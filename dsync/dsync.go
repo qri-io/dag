@@ -37,14 +37,14 @@ var log = golog.Logger("dsync")
 
 const (
 	// default to parallelism of 3. So far 4 was enough to blow up a std k8s pod running IPFS :(
-	defaultPushParallelism = 3
+	defaultPushParallelism = 1
 	// default to parallelism of 3
 	// TODO (b5): tune this figure
-	defaultPullParallelism = 3
+	defaultPullParallelism = 1
 	// total number of retries to attempt before send is considered faulty
 	// TODO (b5): this number should be retries *per object*, and a much lower
 	// number, like 5.
-	maxRetries = 25
+	maxRetries = 80
 )
 
 // DagSyncable is a source that can be synced to & from. dsync requests automate

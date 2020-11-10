@@ -72,6 +72,7 @@ func (rem *HTTPClient) ReceiveBlock(sid, hash string, data []byte) ReceiveRespon
 	url := fmt.Sprintf("%s?sid=%s&hash=%s", rem.URL, sid, hash)
 	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(data))
 	if err != nil {
+		log.Debugf("http client create request error=%s", err)
 		return ReceiveResponse{
 			Hash:   hash,
 			Status: StatusErrored,
@@ -82,10 +83,11 @@ func (rem *HTTPClient) ReceiveBlock(sid, hash string, data []byte) ReceiveRespon
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
+		log.Debugf("http client perform request error=%s", err)
 		return ReceiveResponse{
 			Hash:   hash,
-			Status: StatusErrored,
-			Err:    err,
+			Status: StatusRetry,
+			Err:    fmt.Errorf("performing HTTP PUT: %w", err),
 		}
 	}
 
@@ -100,6 +102,7 @@ func (rem *HTTPClient) ReceiveBlock(sid, hash string, data []byte) ReceiveRespon
 			Err:    fmt.Errorf("remote error: %d %s", res.StatusCode, msg),
 		}
 	}
+
 	return ReceiveResponse{
 		Hash:   hash,
 		Status: StatusOk,

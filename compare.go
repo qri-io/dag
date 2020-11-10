@@ -2,6 +2,8 @@ package dag
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
@@ -16,7 +18,9 @@ func Missing(ctx context.Context, ng ipld.NodeGetter, m *Manifest) (missing *Man
 		if err != nil {
 			return nil, err
 		}
-		if _, err := ng.Get(ctx, id); err == ipld.ErrNotFound {
+
+		_, err = ng.Get(ctx, id)
+		if errors.Is(err, ipld.ErrNotFound) || (err != nil && strings.Contains(err.Error(), "not found")) {
 			nodes = append(nodes, id.String())
 		} else if err != nil {
 			return nil, err

@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"sync"
 
+	"github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	"github.com/qri-io/dag"
@@ -14,10 +15,11 @@ import (
 
 // session tracks the state of a transfer
 type session struct {
+	ctx  context.Context
+	lng  ipld.NodeGetter
+	bapi coreiface.BlockAPI
+
 	id     string
-	ctx    context.Context
-	lng    ipld.NodeGetter
-	bapi   coreiface.BlockAPI
 	pin    bool
 	meta   map[string]string
 	info   *dag.Info
@@ -35,6 +37,7 @@ func newSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAP
 	if calcBlockDiff {
 		log.Debug("calculating block diff")
 		if diff, err = dag.Missing(ctx, lng, info.Manifest); err != nil {
+			log.Debugf("error calculating diff err=%q", err)
 			return nil, err
 		}
 	}
@@ -91,6 +94,25 @@ func (s *session) ReceiveBlock(hash string, data io.Reader) ReceiveResponse {
 		Hash:   hash,
 		Status: StatusOk,
 	}
+}
+
+func (s *session) ReceiveBlocks(ctx context.Context, r io.Reader) error {
+	progCh := make(chan cid.Cid)
+
+	go func() {
+		for id := range progCh {
+			idStr := id.String()
+			for i, h := range s.info.Manifest.Nodes {
+				if idStr == h {
+					s.prog[i] = 100
+				}
+			}
+			go s.completionChanged()
+		}
+	}()
+
+	_, err := AddAllFromCARReader(ctx, s.bapi, r, progCh)
+	return err
 }
 
 // Complete returns if this receive session is finished or not

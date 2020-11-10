@@ -124,6 +124,41 @@ func (snd *Push) do(ctx context.Context) (err error) {
 		return nil
 	}
 
+	protoID, err := snd.remote.ProtocolVersion()
+	if err != nil {
+		return err
+	}
+
+	if protocolSupportsDagStreaming(protoID) {
+		if str, ok := snd.remote.(DagStreamable); ok {
+			progCh := make(chan cid.Cid)
+
+			go func() {
+				for id := range progCh {
+					// this is the only place we should modify progress after creation
+					idStr := id.String()
+					log.Debugf("sent block %s", idStr)
+					for i, hash := range snd.info.Manifest.Nodes {
+						if idStr == hash {
+							snd.prog[i] = 100
+						}
+					}
+					go snd.completionChanged()
+				}
+			}()
+
+			r, err := NewManifestCARReader(ctx, snd.lng, snd.diff, progCh)
+			if err != nil {
+				log.Debugf("err creating CARReader err=%q ", err)
+				return err
+			}
+
+			return str.ReceiveBlocks(ctx, snd.sid, r)
+		}
+	}
+
+	log.Debugf("protocol doesn't support block streaming. falling back to pushing per-block strategy")
+
 	// create senders
 	sends := make([]sender, snd.parallelism)
 	for i := 0; i < snd.parallelism; i++ {

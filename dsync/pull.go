@@ -7,6 +7,7 @@ import (
 
 	"github.com/qri-io/dag"
 
+	"github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 )
@@ -99,6 +100,46 @@ func (f *Pull) Do(ctx context.Context) (err error) {
 }
 
 func (f *Pull) do(ctx context.Context) error {
+	protoID, err := f.remote.ProtocolVersion()
+	if err != nil {
+		return err
+	}
+
+	if protocolSupportsDagStreaming(protoID) {
+		if streamable, ok := f.remote.(DagStreamable); ok {
+			progCh := make(chan cid.Cid)
+			go func() {
+				for {
+					select {
+					case cid := <-progCh:
+						// this is the only place we should modify progress after creation
+						for i, hash := range f.info.Manifest.Nodes {
+							if cid.String() == hash {
+								f.prog[i] = 100
+								go f.completionChanged()
+								break
+							}
+						}
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+
+			r, err := streamable.OpenBlockStream(ctx, f.info, f.meta)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+
+			_, err = AddAllFromCARReader(ctx, f.bapi, r, progCh)
+			return err
+		}
+		log.Debugf("protocol supports streaming but doesn't have the streamable interface: %T %v", f.remote, f.remote)
+	}
+
+	log.Debugf("protocol doesn't support block streaming. falling back to pulling per-block strategy")
+
 	if len(f.diff.Nodes) < f.parallelism {
 		f.parallelism = len(f.diff.Nodes)
 	}

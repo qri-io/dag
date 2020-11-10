@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -30,12 +31,19 @@ import (
 	path "github.com/ipfs/interface-go-ipfs-core/path"
 	host "github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
+	protocol "github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/qri-io/dag"
 )
 
 var log = golog.Logger("dsync")
 
+func init() {
+	golog.SetLogLevel("dsync", "debug")
+}
+
 const (
+	// DsyncProtocolID is the dsyc p2p Protocol Identifier & version tag
+	DsyncProtocolID = protocol.ID("/dsync/0.2.0")
 	// default to parallelism of 3. So far 4 was enough to blow up a std k8s pod running IPFS :(
 	defaultPushParallelism = 1
 	// default to parallelism of 3
@@ -45,6 +53,16 @@ const (
 	// TODO (b5): this number should be retries *per object*, and a much lower
 	// number, like 5.
 	maxRetries = 80
+)
+
+var (
+	// ErrRemoveNotSupported is the error value returned by remotes that don't
+	// support delete operations
+	ErrRemoveNotSupported = fmt.Errorf("remove is not supported")
+	// ErrUnknownProtocolVersion is the error for when the version of the remote
+	// protocol is unknown, usually because the handshake with the the remote
+	// hasn't happened yet
+	ErrUnknownProtocolVersion = fmt.Errorf("unknown protocol version")
 )
 
 // DagSyncable is a source that can be synced to & from. dsync requests automate
@@ -58,24 +76,23 @@ type DagSyncable interface {
 	// The remote will return a delta manifest of blocks the remote needs
 	// and a session id that must be sent with each block
 	NewReceiveSession(info *dag.Info, pinOnComplete bool, meta map[string]string) (sid string, diff *dag.Manifest, err error)
+	// ProtocolVersion indicates the version of dsync the remote speaks, only
+	// available after a handshake is established. Calling this method before a
+	// handshake must return ErrUnknownProtocolVersion
+	ProtocolVersion() (protocol.ID, error)
+
 	// ReceiveBlock places a block on the remote
 	ReceiveBlock(sid, hash string, data []byte) ReceiveResponse
-
 	// GetDagInfo asks the remote for info specified by a the root identifier
 	// string of a DAG
 	GetDagInfo(ctx context.Context, cidStr string, meta map[string]string) (info *dag.Info, err error)
 	// GetBlock gets a block of data from the remote
 	GetBlock(ctx context.Context, hash string) (rawdata []byte, err error)
-
 	// RemoveCID asks the remote to remove a cid. Supporting deletes are optional.
 	// DagSyncables that don't implement DeleteCID must return
 	// ErrDeleteNotSupported
 	RemoveCID(ctx context.Context, cidStr string, meta map[string]string) (err error)
 }
-
-// ErrRemoveNotSupported is the error value returned by remotes that don't
-// support delete operations
-var ErrRemoveNotSupported = fmt.Errorf("remove is not supported")
 
 // Hook is a function that a dsync instance will call at specified points in the
 // sync lifecycle
@@ -134,6 +151,9 @@ type Dsync struct {
 	// getDagInfoCheck is an optional hook to call when a client asks for a dag
 	// info
 	getDagInfoCheck Hook
+	// openBlockStreamCheck is an optional hook to call when a client asks to pull
+	// a stream of one or more blocks
+	openBlockStreamCheck Hook
 	// removeCheck is an optional hook to call before allowing a delete
 	removeCheck Hook
 
@@ -144,8 +164,12 @@ type Dsync struct {
 	sessionTTLDur  time.Duration
 }
 
-// compile-time assertion that Dsync satisfies the remote interface
-var _ DagSyncable = (*Dsync)(nil)
+var (
+	// compile-time assertion that Dsync satisfies the remote interface
+	_ DagSyncable = (*Dsync)(nil)
+	// compile-time assertion that Dsync satisfies streaming interfaces
+	_ DagStreamable = (*Dsync)(nil)
+)
 
 // Config encapsulates optional Dsync configuration
 type Config struct {
@@ -177,6 +201,8 @@ type Config struct {
 	PushComplete Hook
 	// optional check to run on dagInfo requests before sending an info back
 	GetDagInfoCheck Hook
+	// optional hook to run before allowing a stream of blocks
+	OpenBlockStreamCheck Hook
 	// optional check to run before executing a remove operation
 	// the dag.Info given to this check will only contain the root CID being
 	// removed
@@ -227,11 +253,12 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 		requireAllBlocks: cfg.RequireAllBlocks,
 		allowRemoves:     cfg.AllowRemoves,
 
-		preCheck:        cfg.PushPreCheck,
-		finalCheck:      cfg.PushFinalCheck,
-		onCompleteHook:  cfg.PushComplete,
-		getDagInfoCheck: cfg.GetDagInfoCheck,
-		removeCheck:     cfg.RemoveCheck,
+		preCheck:             cfg.PushPreCheck,
+		finalCheck:           cfg.PushFinalCheck,
+		onCompleteHook:       cfg.PushComplete,
+		getDagInfoCheck:      cfg.GetDagInfoCheck,
+		openBlockStreamCheck: cfg.OpenBlockStreamCheck,
+		removeCheck:          cfg.RemoveCheck,
 
 		sessionPool:    map[string]*session{},
 		sessionCancels: map[string]context.CancelFunc{},
@@ -261,6 +288,11 @@ func New(localNodes ipld.NodeGetter, blockStore coreiface.BlockAPI, opts ...func
 	}
 
 	return ds, nil
+}
+
+// ProtocolVersion reports the current procotol version for dsync
+func (ds *Dsync) ProtocolVersion() (protocol.ID, error) {
+	return DsyncProtocolID, nil
 }
 
 // StartRemote makes dsync available for remote requests, starting an HTTP
@@ -347,8 +379,6 @@ func (ds *Dsync) NewPull(cidStr, remoteAddr string, meta map[string]string) (*Pu
 // transfer session. It returns a manifest/diff of the blocks the reciever needs
 // to have a complete DAG new sessions are created with a deadline for completion
 func (ds *Dsync) NewReceiveSession(info *dag.Info, pinOnComplete bool, meta map[string]string) (sid string, diff *dag.Manifest, err error) {
-
-	// TODO (b5) - figure out context passing
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(ds.sessionTTLDur))
 
 	if err = ds.preCheck(ctx, *info, meta); err != nil {
@@ -387,13 +417,12 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 		return ReceiveResponse{
 			Hash:   hash,
 			Status: StatusErrored,
-			Err:    fmt.Errorf("sid '%s' not found", sid),
+			Err:    fmt.Errorf("sid %q not found", sid),
 		}
 	}
 
 	// ReceiveBlock accepts a block from the sender, placing it in the local blockstore
 	res := sess.ReceiveBlock(hash, bytes.NewReader(data))
-	log.Debugf("received block: %s", res.Hash)
 
 	// check if transfer has completed, if so finalize it, but only once
 	if res.Status == StatusOk && sess.IsFinalizedOnce() {
@@ -407,6 +436,27 @@ func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
 	}
 
 	return res
+}
+
+// ReceiveBlocks ingests blocks being pushed into the local store
+func (ds *Dsync) ReceiveBlocks(ctx context.Context, sid string, r io.Reader) error {
+	sess, ok := ds.sessionPool[sid]
+	if !ok {
+		log.Debugf("couldn't find session. sid=%q", sid)
+		return fmt.Errorf("sid %q not found", sid)
+	}
+
+	if err := sess.ReceiveBlocks(ctx, r); err != nil {
+		log.Debugf("error receiving blocks. err=%q", err)
+		return err
+	}
+
+	if err := ds.finalizeReceive(sess); err != nil {
+		log.Debugf("error finalizing receive. err=%q", err)
+		return err
+	}
+
+	return nil
 }
 
 // TODO (b5): needs to be called if someone tries to sync a DAG that requires
@@ -486,6 +536,22 @@ func (ds *Dsync) GetBlock(ctx context.Context, hash string) ([]byte, error) {
 	}
 
 	return ioutil.ReadAll(rdr)
+}
+
+// OpenBlockStream creates a block stream of the contents of the dag.Info
+func (ds *Dsync) OpenBlockStream(ctx context.Context, info *dag.Info, meta map[string]string) (io.ReadCloser, error) {
+	if ds.openBlockStreamCheck != nil {
+		if err := ds.openBlockStreamCheck(ctx, *info, meta); err != nil {
+			return nil, err
+		}
+	}
+
+	rdr, err := NewManifestCARReader(ctx, ds.lng, info.Manifest, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return ioutil.NopCloser(rdr), nil
 }
 
 // RemoveCID unpins a CID if removes are enabled, does not immideately remove

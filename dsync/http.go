@@ -18,9 +18,14 @@ import (
 
 const (
 	httpProtcolIDHeader = "dsync-version"
-	carArchiveMediaType = "archive/car"
-	cborMediaType       = "application/cbor"
 	sidHeader           = "sid"
+)
+
+const (
+	carMIMEType    = "archive/car"
+	cborMIMEType   = "application/cbor"
+	jsonMIMEType   = "application/json"
+	binaryMIMEType = "application/octet-stream"
 )
 
 // HTTPClient is the request side of doing dsync over HTTP
@@ -61,7 +66,8 @@ func (rem *HTTPClient) NewReceiveSession(info *dag.Info, pinOnComplete bool, met
 	if err != nil {
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", jsonMIMEType)
+	req.Header.Set("Accept", jsonMIMEType)
 	req.Header.Set(httpProtcolIDHeader, string(DsyncProtocolID))
 
 	res, err := http.DefaultClient.Do(req)
@@ -106,7 +112,9 @@ func (rem *HTTPClient) ReceiveBlocks(ctx context.Context, sid string, r io.Reade
 		return err
 	}
 	req.TransferEncoding = []string{"chunked"}
-	req.Header.Set("Content-Type", carArchiveMediaType)
+	req.Header.Set("Content-Type", carMIMEType)
+	// response body is only used for error reporting
+	req.Header.Set("Accept", binaryMIMEType)
 	req.Header.Set(httpProtcolIDHeader, string(DsyncProtocolID))
 
 	res, err := http.DefaultClient.Do(req)
@@ -139,7 +147,9 @@ func (rem *HTTPClient) ReceiveBlock(sid, hash string, data []byte) ReceiveRespon
 			Err:    err,
 		}
 	}
-	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Content-Type", binaryMIMEType)
+	// response body is only used for error reporting
+	req.Header.Set("Accept", binaryMIMEType)
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -186,6 +196,7 @@ func (rem *HTTPClient) GetDagInfo(ctx context.Context, id string, meta map[strin
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Accept", jsonMIMEType)
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -213,6 +224,7 @@ func (rem *HTTPClient) GetBlock(ctx context.Context, id string) (data []byte, er
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Accept", binaryMIMEType)
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -253,8 +265,8 @@ func (rem *HTTPClient) OpenBlockStream(ctx context.Context, info *dag.Info, meta
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", cborMediaType)
-	req.Header.Set("Accept", carArchiveMediaType)
+	req.Header.Set("Content-Type", cborMIMEType)
+	req.Header.Set("Accept", carMIMEType)
 	req.Header.Set(httpProtcolIDHeader, string(DsyncProtocolID))
 
 	res, err := http.DefaultClient.Do(req)
@@ -267,7 +279,7 @@ func (rem *HTTPClient) OpenBlockStream(ctx context.Context, info *dag.Info, meta
 		return nil, fmt.Errorf("unexpected HTTP response: %d: %q", res.StatusCode, string(body))
 	}
 
-	if res.Header.Get("Content-Type") != carArchiveMediaType {
+	if res.Header.Get("Content-Type") != carMIMEType {
 		return nil, fmt.Errorf("unexpected media type: %s", res.Header.Get("Content-Type"))
 	}
 
@@ -291,6 +303,8 @@ func (rem *HTTPClient) RemoveCID(ctx context.Context, id string, meta map[string
 	if err != nil {
 		return err
 	}
+	// response body is only used for error reporting
+	req.Header.Set("Accept", binaryMIMEType)
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -321,7 +335,7 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 		case http.MethodPost:
 			createDsyncSession(ds, w, r)
 		case http.MethodPut:
-			if r.Header.Get("Content-Type") == carArchiveMediaType {
+			if r.Header.Get("Content-Type") == carMIMEType {
 				if err := ds.ReceiveBlocks(r.Context(), r.FormValue("sid"), r.Body); err != nil {
 					w.WriteHeader(http.StatusBadRequest)
 					w.Write([]byte(err.Error()))
@@ -361,7 +375,7 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 					return
 				}
 
-				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Type", jsonMIMEType)
 				w.Write(data)
 			} else {
 				data, err := ds.GetBlock(r.Context(), blockID)
@@ -370,7 +384,7 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 					w.Write([]byte(err.Error()))
 					return
 				}
-				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set("Content-Type", binaryMIMEType)
 				w.Write(data)
 			}
 		case http.MethodPatch:
@@ -392,7 +406,7 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 				return
 			}
 
-			w.Header().Set("Content-Type", carArchiveMediaType)
+			w.Header().Set("Content-Type", carMIMEType)
 			w.WriteHeader(http.StatusOK)
 			defer r.Close()
 			io.Copy(w, r)
@@ -435,7 +449,7 @@ func decodeDAGInfoBody(r *http.Request) (*dag.Info, error) {
 	info := &dag.Info{}
 
 	switch r.Header.Get("Content-Type") {
-	case cborMediaType:
+	case cborMIMEType:
 		data, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			return nil, err

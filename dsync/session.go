@@ -165,18 +165,3 @@ func randStringBytesMask(n int) string {
 
 	return string(b)
 }
-
-// type blockApiHaser struct {
-// 	bapi coreiface.BlockAPI
-// }
-
-// func (bh blockApiHaser) Has(id cid.Cid) (bool, error) {
-// 	st, err := bh.bapi.Stat(context.Background(), path.IpfsPath(id))
-// 	if errors.Is() {
-
-// 	}
-// }
-
-// func NewBlockAPIHaser(bapi coreiface.BlockAPI) dag.BlockHaser {
-
-// }

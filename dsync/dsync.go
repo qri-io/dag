@@ -38,7 +38,7 @@ import (
 var log = golog.Logger("dsync")
 
 func init() {
-	golog.SetLogLevel("dsync", "debug")
+	// golog.SetLogLevel("dsync", "debug")
 }
 
 const (

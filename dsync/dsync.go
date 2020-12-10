@@ -82,16 +82,16 @@ type DagSyncable interface {
 	ProtocolVersion() (protocol.ID, error)
 
 	// ReceiveBlock places a block on the remote
-	ReceiveBlock(sid, hash string, data []byte) ReceiveResponse
+	ReceiveBlock(sid string, cid cid.Cid, data []byte) ReceiveResponse
 	// GetDagInfo asks the remote for info specified by a the root identifier
 	// string of a DAG
-	GetDagInfo(ctx context.Context, cidStr string, meta map[string]string) (info *dag.Info, err error)
+	GetDagInfo(ctx context.Context, id cid.Cid, meta map[string]string) (info *dag.Info, err error)
 	// GetBlock gets a block of data from the remote
-	GetBlock(ctx context.Context, hash string) (rawdata []byte, err error)
+	GetBlock(ctx context.Context, id cid.Cid) (rawdata []byte, err error)
 	// RemoveCID asks the remote to remove a cid. Supporting deletes are optional.
 	// DagSyncables that don't implement DeleteCID must return
 	// ErrDeleteNotSupported
-	RemoveCID(ctx context.Context, cidStr string, meta map[string]string) (err error)
+	RemoveCID(ctx context.Context, id cid.Cid, meta map[string]string) (err error)
 }
 
 // Hook is a function that a dsync instance will call at specified points in the
@@ -341,12 +341,7 @@ func (ds *Dsync) syncableRemote(remoteAddr string) (rem DagSyncable, err error) 
 }
 
 // NewPush creates a push from Dsync to a remote address
-func (ds *Dsync) NewPush(cidStr, remoteAddr string, pinOnComplete bool) (*Push, error) {
-	id, err := cid.Parse(cidStr)
-	if err != nil {
-		return nil, err
-	}
-
+func (ds *Dsync) NewPush(id cid.Cid, remoteAddr string, pinOnComplete bool) (*Push, error) {
 	info, err := dag.NewInfo(context.Background(), ds.lng, id)
 	if err != nil {
 		return nil, err
@@ -367,12 +362,12 @@ func (ds *Dsync) NewPushInfo(info *dag.Info, remoteAddr string, pinOnComplete bo
 
 // NewPull creates a pull. A pull fetches an entire DAG from a remote, placing
 // it in the local block store
-func (ds *Dsync) NewPull(cidStr, remoteAddr string, meta map[string]string) (*Pull, error) {
+func (ds *Dsync) NewPull(root cid.Cid, remoteAddr string, meta map[string]string) (*Pull, error) {
 	rem, err := ds.syncableRemote(remoteAddr)
 	if err != nil {
 		return nil, err
 	}
-	return NewPull(cidStr, ds.lng, ds.bapi, rem, meta)
+	return NewPull(root, ds.lng, ds.bapi, rem, meta)
 }
 
 // NewReceiveSession takes a manifest sent by a remote and initiates a
@@ -411,24 +406,24 @@ func (ds *Dsync) NewReceiveSession(info *dag.Info, pinOnComplete bool, meta map[
 // node It notes in the Receive which nodes have been added
 // When the DAG is complete, it puts the manifest into a DAG info and the
 // DAG info into an infoStore
-func (ds *Dsync) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
+func (ds *Dsync) ReceiveBlock(sid string, id cid.Cid, data []byte) ReceiveResponse {
 	sess, ok := ds.sessionPool[sid]
 	if !ok {
 		return ReceiveResponse{
-			Hash:   hash,
+			Cid:    id,
 			Status: StatusErrored,
 			Err:    fmt.Errorf("sid %q not found", sid),
 		}
 	}
 
 	// ReceiveBlock accepts a block from the sender, placing it in the local blockstore
-	res := sess.ReceiveBlock(hash, bytes.NewReader(data))
+	res := sess.ReceiveBlock(id, bytes.NewReader(data))
 
 	// check if transfer has completed, if so finalize it, but only once
 	if res.Status == StatusOk && sess.IsFinalizedOnce() {
 		if err := ds.finalizeReceive(sess); err != nil {
 			return ReceiveResponse{
-				Hash:   sess.info.RootCID().String(),
+				Cid:    sess.info.RootCID(),
 				Status: StatusErrored,
 				Err:    err,
 			}
@@ -477,7 +472,7 @@ func (ds *Dsync) finalizeReceive(sess *session) error {
 	}
 
 	if sess.pin {
-		if err := ds.pin.Add(sess.ctx, path.New(sess.info.Manifest.Nodes[0])); err != nil {
+		if err := ds.pin.Add(sess.ctx, path.IpfsPath(sess.info.Manifest.Nodes[0])); err != nil {
 			return err
 		}
 	}
@@ -499,19 +494,15 @@ func (ds *Dsync) finalizeReceive(sess *session) error {
 	return nil
 }
 
-// GetDagInfo gets the manifest for a DAG rooted at id, checking any configured cache before falling back to generating a new manifest
-func (ds *Dsync) GetDagInfo(ctx context.Context, hash string, meta map[string]string) (info *dag.Info, err error) {
+// GetDagInfo gets the manifest for a DAG rooted at id, checking any configured
+// cache before falling back to generating a new manifest
+func (ds *Dsync) GetDagInfo(ctx context.Context, id cid.Cid, meta map[string]string) (info *dag.Info, err error) {
 	// check cache if one is specified
 	if ds.infoStore != nil {
-		if info, err = ds.infoStore.DAGInfo(ctx, hash); err == nil {
+		if info, err = ds.infoStore.DAGInfo(ctx, id); err == nil {
 			fmt.Println("using cached manifest")
 			return
 		}
-	}
-
-	id, err := cid.Parse(hash)
-	if err != nil {
-		return nil, err
 	}
 
 	info, err = dag.NewInfo(ctx, ds.lng, id)
@@ -529,8 +520,8 @@ func (ds *Dsync) GetDagInfo(ctx context.Context, hash string, meta map[string]st
 }
 
 // GetBlock returns a single block from the store
-func (ds *Dsync) GetBlock(ctx context.Context, hash string) ([]byte, error) {
-	rdr, err := ds.bapi.Get(ctx, path.New(hash))
+func (ds *Dsync) GetBlock(ctx context.Context, id cid.Cid) ([]byte, error) {
+	rdr, err := ds.bapi.Get(ctx, path.IpfsPath(id))
 	if err != nil {
 		return nil, err
 	}
@@ -556,21 +547,21 @@ func (ds *Dsync) OpenBlockStream(ctx context.Context, info *dag.Info, meta map[s
 
 // RemoveCID unpins a CID if removes are enabled, does not immideately remove
 // unpinned content
-func (ds *Dsync) RemoveCID(ctx context.Context, cidStr string, meta map[string]string) error {
+func (ds *Dsync) RemoveCID(ctx context.Context, id cid.Cid, meta map[string]string) error {
 	if !ds.allowRemoves {
 		return ErrRemoveNotSupported
 	}
 
-	log.Debug("removing cid", cidStr)
+	log.Debugw("RemoveCid", "id", id.String())
 	if ds.removeCheck != nil {
-		info := dag.Info{Manifest: &dag.Manifest{Nodes: []string{cidStr}}}
+		info := dag.Info{Manifest: &dag.Manifest{Nodes: []cid.Cid{id}}}
 		if err := ds.removeCheck(ctx, info, meta); err != nil {
 			return err
 		}
 	}
 
 	if ds.pin != nil {
-		return ds.pin.Rm(ctx, path.New(cidStr))
+		return ds.pin.Rm(ctx, path.IpfsPath(id))
 	}
 
 	return nil

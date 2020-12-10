@@ -36,7 +36,7 @@ const (
 
 // ReceiveResponse defines the result of sending a block, or attempting to send a block.
 type ReceiveResponse struct {
-	Hash   string
+	Cid    cid.Cid
 	Status ReceiveResponseStatus
 	Err    error
 }
@@ -53,9 +53,9 @@ type Push struct {
 	parallelism   int               // number of "tracks" for sending along
 	prog          dag.Completion    // progress state
 	progCh        chan dag.Completion
-	blocksCh      chan string
+	blocksCh      chan cid.Cid
 	responses     chan ReceiveResponse
-	retries       chan string
+	retries       chan cid.Cid
 }
 
 // NewPush initiates a send for a DAG at an id from a local to a remote.
@@ -72,10 +72,10 @@ func NewPush(lng ipld.NodeGetter, info *dag.Info, remote DagSyncable, pinOnCompl
 		lng:           lng,
 		remote:        remote,
 		parallelism:   parallelism,
-		blocksCh:      make(chan string),
+		blocksCh:      make(chan cid.Cid),
 		progCh:        make(chan dag.Completion),
 		responses:     make(chan ReceiveResponse),
-		retries:       make(chan string),
+		retries:       make(chan cid.Cid),
 	}
 	return ps, nil
 }
@@ -136,10 +136,9 @@ func (snd *Push) do(ctx context.Context) (err error) {
 			go func() {
 				for id := range progCh {
 					// this is the only place we should modify progress after creation
-					idStr := id.String()
-					log.Debugf("sent block %s", idStr)
-					for i, hash := range snd.info.Manifest.Nodes {
-						if idStr == hash {
+					log.Debugf("sent block %s", id)
+					for i, nid := range snd.info.Manifest.Nodes {
+						if id.Equals(nid) {
 							snd.prog[i] = 100
 						}
 					}
@@ -185,8 +184,8 @@ func (snd *Push) do(ctx context.Context) (err error) {
 				switch r.Status {
 				case StatusOk:
 					// this is the only place we should modify progress after creation
-					for i, hash := range snd.info.Manifest.Nodes {
-						if r.Hash == hash {
+					for i, id := range snd.info.Manifest.Nodes {
+						if r.Cid.Equals(id) {
 							snd.prog[i] = 100
 						}
 					}
@@ -196,14 +195,14 @@ func (snd *Push) do(ctx context.Context) (err error) {
 						return
 					}
 				case StatusErrored:
-					log.Debugf("error pushing block. hash=%q error=%q", r.Hash, r.Err)
+					log.Debugf("error pushing block. cid=%q error=%q", r.Cid, r.Err)
 					errCh <- r.Err
 					for _, s := range sends {
 						s.stop()
 					}
 				case StatusRetry:
-					log.Debugf("retrying push block. hash=%q error=%q", r.Hash, r.Err)
-					snd.retries <- r.Hash
+					log.Debugf("retrying push block. cid=%q error=%q", r.Cid, r.Err)
+					snd.retries <- r.Cid
 				}
 			}(res)
 		}
@@ -251,7 +250,7 @@ type sender struct {
 	sid       string
 	lng       ipld.NodeGetter
 	remote    DagSyncable
-	blocksCh  chan string
+	blocksCh  chan cid.Cid
 	responses chan ReceiveResponse
 	stopCh    chan bool
 }
@@ -259,32 +258,23 @@ type sender struct {
 func (s sender) start(ctx context.Context) {
 	for {
 		select {
-		case hash := <-s.blocksCh:
+		case id := <-s.blocksCh:
 			// here we're syncronizing multiple channels in a select, and in this case
 			// we're (probably) firing off a blocking call to s.remote.PutBlock that's
 			// waiting on a network response. This can prevent reading on stopCh & ctx.Done
 			// which is very bad, so we fire a goroutine to prevent the select loop from
 			// ever blocking. Concurrency is fun!
 			go func() {
-				id, err := cid.Parse(hash)
-				if err != nil {
-					log.Debugf("error parsing sent block: %s", err)
-					s.responses <- ReceiveResponse{
-						Hash:   hash,
-						Status: StatusErrored,
-						Err:    err,
-					}
-				}
 				node, err := s.lng.Get(ctx, id)
 				if err != nil {
 					s.responses <- ReceiveResponse{
-						Hash:   hash,
+						Cid:    id,
 						Status: StatusErrored,
 						Err:    err,
 					}
 					return
 				}
-				s.responses <- s.remote.ReceiveBlock(s.sid, hash, node.RawData())
+				s.responses <- s.remote.ReceiveBlock(s.sid, id, node.RawData())
 			}()
 
 		case <-s.stopCh:

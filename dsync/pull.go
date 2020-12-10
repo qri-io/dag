@@ -13,16 +13,16 @@ import (
 )
 
 // NewPull sets up fetching a DAG at an id from a remote
-func NewPull(cidStr string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem DagSyncable, meta map[string]string) (pull *Pull, err error) {
+func NewPull(root cid.Cid, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem DagSyncable, meta map[string]string) (pull *Pull, err error) {
 	f := &Pull{
-		path:        cidStr,
+		root:        root,
 		meta:        meta,
 		lng:         lng,
 		bapi:        bapi,
 		remote:      rem,
 		parallelism: defaultPullParallelism,
 		progCh:      make(chan dag.Completion),
-		reqCh:       make(chan string),
+		reqCh:       make(chan cid.Cid),
 		resCh:       make(chan blockResponse),
 	}
 
@@ -31,7 +31,7 @@ func NewPull(cidStr string, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem Da
 
 // NewPullWithInfo creates a pull when we already have a dag.Info
 func NewPullWithInfo(info *dag.Info, lng ipld.NodeGetter, bapi coreiface.BlockAPI, rem DagSyncable, meta map[string]string) (pull *Pull, err error) {
-	f, err := NewPull(info.RootCID().String(), lng, bapi, rem, meta)
+	f, err := NewPull(info.RootCID(), lng, bapi, rem, meta)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func NewPullWithInfo(info *dag.Info, lng ipld.NodeGetter, bapi coreiface.BlockAP
 
 // Pull coordinates the transfer of missing blocks in a DAG from a remote to a block store
 type Pull struct {
-	path        string
+	root        cid.Cid
 	meta        map[string]string
 	info        *dag.Info
 	diff        *dag.Manifest
@@ -51,13 +51,13 @@ type Pull struct {
 	parallelism int
 	prog        dag.Completion
 	progCh      chan dag.Completion
-	reqCh       chan string
+	reqCh       chan cid.Cid
 	resCh       chan blockResponse
 }
 
 // blockResponse is a response from a pull request
 type blockResponse struct {
-	Hash  string
+	Cid   cid.Cid
 	Raw   []byte
 	Error error
 }
@@ -79,7 +79,7 @@ func (f *Pull) Do(ctx context.Context) (err error) {
 	//    - every time we receive a block, check if we're done
 	if f.info == nil {
 		// request a manifest from the remote if we don't have one
-		if f.info, err = f.remote.GetDagInfo(ctx, f.path, f.meta); err != nil {
+		if f.info, err = f.remote.GetDagInfo(ctx, f.root, f.meta); err != nil {
 			return
 		}
 	}
@@ -113,8 +113,8 @@ func (f *Pull) do(ctx context.Context) error {
 					select {
 					case cid := <-progCh:
 						// this is the only place we should modify progress after creation
-						for i, hash := range f.info.Manifest.Nodes {
-							if cid.String() == hash {
+						for i, id := range f.info.Manifest.Nodes {
+							if cid == id {
 								f.prog[i] = 100
 								go f.completionChanged()
 								break
@@ -179,13 +179,13 @@ func (f *Pull) do(ctx context.Context) error {
 						errCh <- res.Error
 					}
 
-					if bs.Path().Cid().String() != res.Hash {
-						errCh <- fmt.Errorf("hash integrity mismatch. expected %s, got: %s", bs.Path().Cid().String(), res.Hash)
+					if !bs.Path().Cid().Equals(res.Cid) {
+						errCh <- fmt.Errorf("hash integrity mismatch. expected %s, got: %s", bs.Path().Cid().String(), res.Cid)
 					}
 
 					// this is the only place we should modify progress after creation
-					for i, hash := range f.info.Manifest.Nodes {
-						if res.Hash == hash {
+					for i, id := range f.info.Manifest.Nodes {
+						if res.Cid.Equals(id) {
 							f.prog[i] = 100
 						}
 					}
@@ -225,7 +225,7 @@ type puller struct {
 	id     int
 	remote DagSyncable
 	ctx    context.Context
-	reqCh  <-chan string
+	reqCh  <-chan cid.Cid
 	resCh  chan blockResponse
 	stopCh chan bool
 }
@@ -237,11 +237,11 @@ type puller struct {
 func (f puller) start() {
 	for {
 		select {
-		case hash := <-f.reqCh:
+		case id := <-f.reqCh:
 			go func() {
-				data, err := f.remote.GetBlock(f.ctx, hash)
+				data, err := f.remote.GetBlock(f.ctx, id)
 				f.resCh <- blockResponse{
-					Hash:  hash,
+					Cid:   id,
 					Raw:   data,
 					Error: err,
 				}

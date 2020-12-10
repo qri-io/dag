@@ -89,7 +89,7 @@ func TestSyncHTTP(t *testing.T) {
 
 	<-onCompleteCalled
 
-	if err := cli.RemoveCID(ctx, info.RootCID().String(), nil); err != nil {
+	if err := cli.RemoveCID(ctx, info.RootCID(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -121,9 +121,11 @@ func TestRemoveNotSupported(t *testing.T) {
 	s := httptest.NewServer(HTTPRemoteHandler(bdsync))
 	defer s.Close()
 
+	id := mustAddOneBlockDAG(b)
+
 	cli := &HTTPClient{URL: s.URL + "/dsync"}
-	if err := cli.RemoveCID(ctx, "foo", nil); err != ErrRemoveNotSupported {
-		t.Errorf("expected error remoce not supported, got: %s", err.Error())
+	if err := cli.RemoveCID(ctx, id, nil); err != ErrRemoveNotSupported {
+		t.Errorf("expected error remove not supported, got: %s", err.Error())
 	}
 }
 
@@ -132,7 +134,7 @@ func TestHooksMetaHTTP(t *testing.T) {
 	defer done()
 
 	nodeA, nodeB := mustNewLocalRemoteIPFSAPI(ctx)
-	cid := mustAddOneBlockDAG(nodeA)
+	id := mustAddOneBlockDAG(nodeA)
 	ang, err := NewLocalNodeGetter(nodeA)
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +186,7 @@ func TestHooksMetaHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	push, err := aDsync.NewPush(cid.String(), remoteAddr, true)
+	push, err := aDsync.NewPush(id, remoteAddr, true)
 	push.SetMeta(check)
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +195,7 @@ func TestHooksMetaHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pull, err := aDsync.NewPull(cid.String(), remoteAddr, check)
+	pull, err := aDsync.NewPull(id, remoteAddr, check)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,13 +311,13 @@ func TestBackwardCompatibleClient(t *testing.T) {
 
 	<-onCompleteCalled
 
-	if err := cli.RemoveCID(ctx, info.RootCID().String(), nil); err != nil {
+	if err := cli.RemoveCID(ctx, info.RootCID(), nil); err != nil {
 		t.Fatal(err)
 	}
 
 	<-removeCheckCalled
 
-	pull, err := cdsync.NewPull(info.RootCID().String(), proxy.URL+"/dsync", nil)
+	pull, err := cdsync.NewPull(info.RootCID(), proxy.URL+"/dsync", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

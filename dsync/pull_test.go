@@ -19,7 +19,7 @@ func TestPull(t *testing.T) {
 		bapi: b.Block(),
 	}
 
-	p, err := NewPull(id.String(), aGetter, a.Block(), rem, nil)
+	p, err := NewPull(id, aGetter, a.Block(), rem, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

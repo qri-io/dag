@@ -63,7 +63,7 @@ func ExampleNew() {
 		// we MUST override the PreCheck function. In this example we're making sure
 		// no one sends us a bad hash:
 		cfg.PushPreCheck = func(ctx context.Context, info dag.Info, _ map[string]string) error {
-			if info.Manifest.Nodes[0] == "BadHash" {
+			if info.Manifest.Nodes[0].String() == "BadHash" {
 				return fmt.Errorf("rejected for secret reasons")
 			}
 			return nil
@@ -83,7 +83,7 @@ func ExampleNew() {
 	}
 
 	// Create a Push:
-	push, err := aDsync.NewPush(cid.String(), fmt.Sprintf("http://localhost%s/dsync", bAddr), true)
+	push, err := aDsync.NewPush(cid, fmt.Sprintf("http://localhost%s/dsync", bAddr), true)
 	if err != nil {
 		panic(err)
 	}

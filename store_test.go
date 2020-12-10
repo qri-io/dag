@@ -31,29 +31,20 @@ func testInfoStoreInterface(is InfoStore) func(t *testing.T) {
 			t.Errorf("expected empty delete to return false deleted value")
 		}
 
-		if err := is.PutDAGInfo(ctx, info.RootCID().String(), info); err != nil {
+		if err := is.PutDAGInfo(ctx, info.RootCID(), info); err != nil {
 			t.Errorf("error putting info: %s", err.Error())
 		}
 
-		if err := is.PutDAGInfo(ctx, "foo", info); err != nil {
-			t.Errorf("error putting info with arbitrary id key: %s", err.Error())
-		}
-
-		info, err = is.DAGInfo(ctx, info.RootCID().String())
+		info, err = is.DAGInfo(ctx, info.RootCID())
 		if err != nil {
 			t.Errorf("error getting info: %s", err.Error())
 		}
 
-		if deleted, err := is.DeleteDAGInfo(ctx, info.RootCID().String()); err != nil {
+		if deleted, err := is.DeleteDAGInfo(ctx, info.RootCID()); err != nil {
 			t.Errorf("error deleting info: %s", err.Error())
 		} else if !deleted {
 			t.Errorf("expected deleted to return true")
 		}
 
-		if deleted, err := is.DeleteDAGInfo(ctx, "foo"); err != nil {
-			t.Errorf("error deleting arbitrary key: %s", err.Error())
-		} else if !deleted {
-			t.Errorf("expected dleted to equal true")
-		}
 	}
 }

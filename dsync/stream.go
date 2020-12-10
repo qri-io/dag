@@ -61,18 +61,19 @@ func protocolSupportsDagStreaming(pid protocol.ID) bool {
 // each CID is buffered to the read stream
 func NewManifestCARReader(ctx context.Context, ng ipld.NodeGetter, mfst *dag.Manifest, progCh chan cid.Cid) (io.Reader, error) {
 
-	cids := make([]cid.Cid, 0, len(mfst.Nodes))
-	for _, cidStr := range mfst.Nodes {
-		id, err := cid.Decode(cidStr)
-		if err != nil {
-			return nil, err
-		}
-		id, err = cid.Cast(id.Bytes())
-		if err != nil {
-			return nil, err
-		}
-		cids = append(cids, id)
-	}
+	// cids := make([]cid.Cid, 0, len(mfst.Nodes))
+	// for _, id := range mfst.Nodes {
+	// 	id, err := cid.Decode(cidStr)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	id, err = cid.Cast(id.Bytes())
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	cids = append(cids, id)
+	// }
+	cids := []cid.Cid(mfst.Nodes)
 
 	buf := &bytes.Buffer{}
 	header := &car.CarHeader{

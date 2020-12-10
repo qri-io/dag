@@ -11,7 +11,7 @@ import (
 
 // Missing returns a manifest describing blocks that are not in this node for a given manifest
 func Missing(ctx context.Context, ng ipld.NodeGetter, m *Manifest) (missing *Manifest, err error) {
-	var nodes []string
+	var nodes CidList
 
 	for _, idstr := range m.Nodes {
 		id, err := cid.Parse(idstr)
@@ -21,7 +21,7 @@ func Missing(ctx context.Context, ng ipld.NodeGetter, m *Manifest) (missing *Man
 
 		_, err = ng.Get(ctx, id)
 		if errors.Is(err, ipld.ErrNotFound) || (err != nil && strings.Contains(err.Error(), "not found")) {
-			nodes = append(nodes, id.String())
+			nodes = append(nodes, id)
 		} else if err != nil {
 			return nil, err
 		}

@@ -72,13 +72,13 @@ func TestNewManifest(t *testing.T) {
 	}
 
 	exp := &Manifest{
-		Nodes: []string{
-			"bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e", // a
-			"bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu", // c
-			"bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy", // d
-			"bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri", // e
-			"bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm", // b
-			"bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu", // f
+		Nodes: []cid.Cid{
+			mustCid("bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e"), // a
+			mustCid("bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu"), // c
+			mustCid("bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy"), // d
+			mustCid("bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri"), // e
+			mustCid("bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm"), // b
+			mustCid("bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu"), // f
 		},
 		Links: [][2]int{
 			{0, 1}, {0, 4}, {1, 2}, {1, 3}, {2, 5},
@@ -86,6 +86,14 @@ func TestNewManifest(t *testing.T) {
 	}
 
 	verifyManifest(t, exp, mf)
+}
+
+func mustCid(s string) cid.Cid {
+	id, err := cid.Parse(s)
+	if err != nil {
+		panic(err)
+	}
+	return id
 }
 
 func TestIDIndex(t *testing.T) {
@@ -97,6 +105,7 @@ func TestIDIndex(t *testing.T) {
 	d := newNode(40) // bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy
 	e := newNode(50) // bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri
 	f := newNode(60) // bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu
+	// missing := newNode(70) // bafkreihh63abc53orw342mylkqlu7v3ppubbnnqshb5f77h3qhtpbemwqm
 	a.links = []*node{b, c}
 	c.links = []*node{d, e}
 	d.links = []*node{f}
@@ -112,7 +121,7 @@ func TestIDIndex(t *testing.T) {
 		id       string
 		expIndex int
 	}{
-		{"bad id", -1},
+		{"bafkreihh63abc53orw342mylkqlu7v3ppubbnnqshb5f77h3qhtpbemwqm", -1},
 		{"bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e", 0},
 		{"bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu", 1},
 		{"bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy", 2},
@@ -122,7 +131,7 @@ func TestIDIndex(t *testing.T) {
 	}
 
 	for i, c := range cases {
-		gotIndex := mf.IDIndex(c.id)
+		gotIndex := mf.IDIndex(mustCid(c.id))
 		if gotIndex != c.expIndex {
 			t.Errorf("case %d index mismatch, expected %d, got %d", i, c.expIndex, gotIndex)
 		}
@@ -151,13 +160,13 @@ func TestNewInfo(t *testing.T) {
 
 	exp := &Info{
 		Manifest: &Manifest{
-			Nodes: []string{
-				"bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e", // a
-				"bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu", // c
-				"bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy", // d
-				"bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri", // e
-				"bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm", // b
-				"bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu", // f
+			Nodes: []cid.Cid{
+				mustCid("bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e"), // a
+				mustCid("bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu"), // c
+				mustCid("bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy"), // d
+				mustCid("bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri"), // e
+				mustCid("bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm"), // b
+				mustCid("bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu"), // f
 			},
 			Links: [][2]int{
 				{0, 1}, {0, 4}, {1, 2}, {1, 3}, {2, 5},
@@ -251,12 +260,13 @@ func TestAddLabelByID(t *testing.T) {
 	}
 
 	cases := []struct {
-		label, id string
-		err       error
+		label string
+		id    cid.Cid
+		err   error
 	}{
-		{"bad id", "BAD ID", ErrIDNotFound},
-		{"root", "bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e", nil},
-		{"leaf", "bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu", nil},
+		{"bad id", mustCid("bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e"), ErrIDNotFound},
+		{"root", mustCid("bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e"), nil},
+		{"leaf", mustCid("bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu"), nil},
 	}
 
 	for i, c := range cases {
@@ -457,10 +467,18 @@ func TestCompletion(t *testing.T) {
 
 func TestNewCompletion(t *testing.T) {
 	mfst := &Manifest{
-		Nodes: []string{"a", "b", "c", "d"},
+		Nodes: []cid.Cid{
+			mustCid("bafkreic75tvwn76in44nsutynrwws3dzyln4eoo5j2i3izzj245cp62x5e"), // a
+			mustCid("bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm"), // b
+			mustCid("bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu"), // c
+			mustCid("bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy"), // d
+		},
 	}
 	missing := &Manifest{
-		Nodes: []string{"b", "c"},
+		Nodes: []cid.Cid{
+			mustCid("bafkreidlq2zhh7zu7tqz224aj37vup2xi6w2j2vcf4outqa6klo3pb23jm"), // b
+			mustCid("bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu"), // c
+		},
 	}
 	comp := NewCompletion(mfst, missing)
 	if comp.Percentage() != 0.5 {

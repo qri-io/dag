@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	protocol "github.com/libp2p/go-libp2p-core/protocol"
@@ -135,13 +136,13 @@ func (rem *HTTPClient) ReceiveBlocks(ctx context.Context, sid string, r io.Reade
 }
 
 // ReceiveBlock asks a remote to receive a block over HTTP
-func (rem *HTTPClient) ReceiveBlock(sid, hash string, data []byte) ReceiveResponse {
-	url := fmt.Sprintf("%s?sid=%s&hash=%s", rem.URL, sid, hash)
+func (rem *HTTPClient) ReceiveBlock(sid string, id cid.Cid, data []byte) ReceiveResponse {
+	url := fmt.Sprintf("%s?sid=%s&hash=%s", rem.URL, sid, id)
 	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(data))
 	if err != nil {
 		log.Debugf("http client create request error=%s", err)
 		return ReceiveResponse{
-			Hash:   hash,
+			Cid:    id,
 			Status: StatusErrored,
 			Err:    err,
 		}
@@ -154,7 +155,7 @@ func (rem *HTTPClient) ReceiveBlock(sid, hash string, data []byte) ReceiveRespon
 	if err != nil {
 		log.Debugf("http client perform request error=%s", err)
 		return ReceiveResponse{
-			Hash:   hash,
+			Cid:    id,
 			Status: StatusRetry,
 			Err:    fmt.Errorf("performing HTTP PUT: %w", err),
 		}
@@ -166,26 +167,26 @@ func (rem *HTTPClient) ReceiveBlock(sid, hash string, data []byte) ReceiveRespon
 			msg = string(data)
 		}
 		return ReceiveResponse{
-			Hash:   hash,
+			Cid:    id,
 			Status: StatusErrored,
 			Err:    fmt.Errorf("remote error: %d %s", res.StatusCode, msg),
 		}
 	}
 
 	return ReceiveResponse{
-		Hash:   hash,
+		Cid:    id,
 		Status: StatusOk,
 	}
 }
 
 // GetDagInfo fetches a manifest from a remote source over HTTP
-func (rem *HTTPClient) GetDagInfo(ctx context.Context, id string, meta map[string]string) (info *dag.Info, err error) {
+func (rem *HTTPClient) GetDagInfo(ctx context.Context, id cid.Cid, meta map[string]string) (info *dag.Info, err error) {
 	u, err := url.Parse(rem.URL)
 	if err != nil {
 		return
 	}
 	q := u.Query()
-	q.Set("manifest", id)
+	q.Set("manifest", id.String())
 	for key, val := range meta {
 		q.Set(key, val)
 	}
@@ -218,7 +219,7 @@ func (rem *HTTPClient) GetDagInfo(ctx context.Context, id string, meta map[strin
 }
 
 // GetBlock fetches a block from a remote source over HTTP
-func (rem *HTTPClient) GetBlock(ctx context.Context, id string) (data []byte, err error) {
+func (rem *HTTPClient) GetBlock(ctx context.Context, id cid.Cid) (data []byte, err error) {
 	url := fmt.Sprintf("%s?block=%s", rem.URL, id)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -287,13 +288,13 @@ func (rem *HTTPClient) OpenBlockStream(ctx context.Context, info *dag.Info, meta
 }
 
 // RemoveCID asks a remote to remove a CID
-func (rem *HTTPClient) RemoveCID(ctx context.Context, id string, meta map[string]string) (err error) {
+func (rem *HTTPClient) RemoveCID(ctx context.Context, id cid.Cid, meta map[string]string) (err error) {
 	u, err := url.Parse(rem.URL)
 	if err != nil {
 		return
 	}
 	q := u.Query()
-	q.Set("cid", id)
+	q.Set("cid", id.String())
 	for key, val := range meta {
 		q.Set(key, val)
 	}
@@ -354,6 +355,13 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 				w.Write([]byte("either manifest or block query params are required"))
 			} else if mfstID != "" {
 
+				mfstCid, err := cid.Parse(mfstID)
+				if err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(err.Error()))
+					return
+				}
+
 				meta := map[string]string{}
 				for key := range r.URL.Query() {
 					if key != "manifest" {
@@ -361,9 +369,9 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 					}
 				}
 
-				mfst, err := ds.GetDagInfo(r.Context(), mfstID, meta)
+				mfst, err := ds.GetDagInfo(r.Context(), mfstCid, meta)
 				if err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
+					w.WriteHeader(http.StatusBadRequest)
 					w.Write([]byte(err.Error()))
 					return
 				}
@@ -378,7 +386,14 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 				w.Header().Set("Content-Type", jsonMIMEType)
 				w.Write(data)
 			} else {
-				data, err := ds.GetBlock(r.Context(), blockID)
+				blockCid, err := cid.Parse(blockID)
+				if err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(err.Error()))
+					return
+				}
+
+				data, err := ds.GetBlock(r.Context(), blockCid)
 				if err != nil {
 					w.WriteHeader(http.StatusInternalServerError)
 					w.Write([]byte(err.Error()))
@@ -413,7 +428,14 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 			return
 
 		case http.MethodDelete:
-			cid := r.FormValue("cid")
+			cidStr := r.FormValue("cid")
+			id, err := cid.Parse(cidStr)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(err.Error()))
+				return
+			}
+
 			meta := map[string]string{}
 			for key := range r.URL.Query() {
 				if key != "cid" {
@@ -421,7 +443,7 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 				}
 			}
 
-			if err := ds.RemoveCID(r.Context(), cid, meta); err != nil {
+			if err := ds.RemoveCID(r.Context(), id, meta); err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				w.Write([]byte(err.Error()))
 				return
@@ -480,7 +502,14 @@ func receiveBlockHTTP(ds *Dsync, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := ds.ReceiveBlock(r.FormValue("sid"), r.FormValue("hash"), data)
+	resCid, err := cid.Parse(r.FormValue("hash"))
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("well-formed cid 'hash' value is required"))
+		return
+	}
+
+	res := ds.ReceiveBlock(r.FormValue("sid"), resCid, data)
 
 	if res.Status == StatusErrored {
 		w.WriteHeader(http.StatusInternalServerError)

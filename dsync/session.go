@@ -62,36 +62,35 @@ func newSession(ctx context.Context, lng ipld.NodeGetter, bapi coreiface.BlockAP
 }
 
 // ReceiveBlock accepts a block from the sender, placing it in the local blockstore
-func (s *session) ReceiveBlock(hash string, data io.Reader) ReceiveResponse {
+func (s *session) ReceiveBlock(id cid.Cid, data io.Reader) ReceiveResponse {
 	bstat, err := s.bapi.Put(s.ctx, data)
 
 	if err != nil {
 		return ReceiveResponse{
-			Hash:   hash,
+			Cid:    id,
 			Status: StatusRetry,
 			Err:    err,
 		}
 	}
 
-	id := bstat.Path().Cid()
-	if id.String() != hash {
+	if !bstat.Path().Cid().Equals(id) {
 		return ReceiveResponse{
-			Hash:   hash,
+			Cid:    id,
 			Status: StatusErrored,
-			Err:    fmt.Errorf("hash mismatch. expected: '%s', got: '%s'", hash, id.String()),
+			Err:    fmt.Errorf("hash mismatch. expected: %q, got: %q", id, bstat.Path().Cid()),
 		}
 	}
 
 	// this should be the only place that modifies progress
-	for i, h := range s.info.Manifest.Nodes {
-		if hash == h {
+	for i, nid := range s.info.Manifest.Nodes {
+		if id.Equals(nid) {
 			s.prog[i] = 100
 		}
 	}
 	go s.completionChanged()
 
 	return ReceiveResponse{
-		Hash:   hash,
+		Cid:    id,
 		Status: StatusOk,
 	}
 }
@@ -101,9 +100,8 @@ func (s *session) ReceiveBlocks(ctx context.Context, r io.Reader) error {
 
 	go func() {
 		for id := range progCh {
-			idStr := id.String()
-			for i, h := range s.info.Manifest.Nodes {
-				if idStr == h {
+			for i, nid := range s.info.Manifest.Nodes {
+				if id.Equals(nid) {
 					s.prog[i] = 100
 				}
 			}

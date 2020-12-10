@@ -46,9 +46,9 @@ func NewManifest(ctx context.Context, ng ipld.NodeGetter, id cid.Cid) (*Manifest
 	ms := &mstate{
 		ctx:     ctx,
 		ng:      ng,
-		weights: map[string]int{},
-		links:   [][2]string{},
-		sizes:   map[string]uint64{},
+		weights: map[cid.Cid]int{},
+		links:   [][2]cid.Cid{},
+		sizes:   map[cid.Cid]uint64{},
 		m:       &Manifest{},
 	}
 
@@ -81,7 +81,7 @@ func NewManifest(ctx context.Context, ng ipld.NodeGetter, id cid.Cid) (*Manifest
 // foundation for
 type Manifest struct {
 	Links [][2]int `json:"links"` // links between nodes
-	Nodes []string `json:"nodes"` // list if CIDS contained in the DAG
+	Nodes CidList  `json:"nodes"` // list if CIDS contained in the DAG
 }
 
 // RootCID returns the root node as a CID. If for some reason the manifest is empty
@@ -90,31 +90,18 @@ func (m *Manifest) RootCID() cid.Cid {
 	if len(m.Nodes) == 0 {
 		return cid.Undef
 	}
-	id, err := cid.Parse(m.Nodes[0])
-	if err != nil {
-		return cid.Undef
-	}
-	return id
+	return m.Nodes[0]
 }
 
-// IDIndex returns the node index of the id
-func (m *Manifest) IDIndex(id string) int {
+// IDIndex returns the node index of the id, returns -1 if no index exists
+func (m *Manifest) IDIndex(id cid.Cid) int {
 	for i, node := range m.Nodes {
-		if node == id {
+		if node.Equals(id) {
 			return i
 		}
 	}
 	return -1
 }
-
-// // SubDAGIndex lists all hashes that are a descendant of manifest node index
-// func (m *Manifest) SubDAGIndex(idx int, nodes *[]string) {
-// 	// for i, l := range m.Links {
-// 	// 	if l[0] == idx {
-
-// 	// 	}
-// 	// }
-// }
 
 // MarshalCBOR encodes this manifest as CBOR data
 func (m *Manifest) MarshalCBOR() (data []byte, err error) {
@@ -143,9 +130,9 @@ func (sl sortableLinks) Swap(i, j int) { sl[i], sl[j] = sl[j], sl[i] }
 type mstate struct {
 	ctx     context.Context
 	ng      ipld.NodeGetter
-	weights map[string]int // map of already-added cids to weight (descendant count)
-	links   [][2]string
-	sizes   map[string]uint64
+	weights map[cid.Cid]int // map of already-added cids to weight (descendant count)
+	links   [][2]cid.Cid
+	sizes   map[cid.Cid]uint64
 	m       *Manifest
 }
 
@@ -161,7 +148,7 @@ func (ms *mstate) makeManifest(id cid.Cid) error {
 	}
 
 	// alpha sort keys
-	sort.StringSlice(ms.m.Nodes).Sort()
+	sort.Sort(ms.m.Nodes)
 	// then sort by weight
 	sort.Sort(ms)
 
@@ -190,7 +177,7 @@ func (ms *mstate) Swap(i, j int)      { ms.m.Nodes[j], ms.m.Nodes[i] = ms.m.Node
 // addNode returns early if this node is already added to the manifest
 // note (b5): this is one of my fav techniques. I ship hard for pointer outparams + recursion
 func (ms *mstate) addNode(node Node, weight *int) (err error) {
-	id := node.Cid().String()
+	id := node.Cid()
 	if _, ok := ms.sizes[id]; ok {
 		return nil
 	}
@@ -210,7 +197,7 @@ func (ms *mstate) addNode(node Node, weight *int) (err error) {
 		if err != nil {
 			return err
 		}
-		ms.links = append(ms.links, [2]string{id, linkNode.Cid().String()})
+		ms.links = append(ms.links, [2]cid.Cid{id, linkNode.Cid()})
 
 		lWeight = 0
 		if err = ms.addNode(linkNode, &lWeight); err != nil {
@@ -229,9 +216,9 @@ func NewInfo(ctx context.Context, ng ipld.NodeGetter, id cid.Cid) (*Info, error)
 	ms := &mstate{
 		ctx:     ctx,
 		ng:      ng,
-		weights: map[string]int{},
-		links:   [][2]string{},
-		sizes:   map[string]uint64{},
+		weights: map[cid.Cid]int{},
+		links:   [][2]cid.Cid{},
+		sizes:   map[cid.Cid]uint64{},
 		m:       &Manifest{},
 	}
 
@@ -281,7 +268,7 @@ func (i *Info) AddLabel(label string, index int) error {
 
 // AddLabelByID adds a label to the list of Info.Labels
 // it returns an error if the id is not part of the DAG
-func (i *Info) AddLabelByID(label, id string) error {
+func (i *Info) AddLabelByID(label string, id cid.Cid) error {
 	index := i.Manifest.IDIndex(id)
 	if index == -1 {
 		return ErrIDNotFound
@@ -374,3 +361,17 @@ func (p Completion) Complete() bool {
 	}
 	return true
 }
+
+// CidList is a sortable slice of content identifiers
+type CidList []cid.Cid
+
+var _ (sort.Interface) = (*CidList)(nil)
+
+// Len returns the length of the list
+func (l CidList) Len() int { return len(l) }
+
+// Less returns true if i is less than j
+func (l CidList) Less(i, j int) bool { return l[i].KeyString() < l[j].KeyString() }
+
+// Swap switches the values of i & j in the list
+func (l CidList) Swap(i, j int) { l[i], l[j] = l[j], l[i] }

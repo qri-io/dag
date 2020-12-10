@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ipfs/go-cid"
 	host "github.com/libp2p/go-libp2p-core/host"
 	net "github.com/libp2p/go-libp2p-core/network"
 	peer "github.com/libp2p/go-libp2p-core/peer"
@@ -75,24 +76,33 @@ func (c *p2pClient) ProtocolVersion() (protocol.ID, error) {
 }
 
 // ReceiveBlock places a block on the remote
-func (c *p2pClient) ReceiveBlock(sid, cidStr string, data []byte) ReceiveResponse {
+func (c *p2pClient) ReceiveBlock(sid string, id cid.Cid, data []byte) ReceiveResponse {
 	msg := p2putil.NewMessage(c.host.ID(), mtReceiveBlock, data).WithHeaders(
 		"sid", sid,
-		"cid", cidStr,
+		"cid", id.String(),
 		"phase", "request",
 	)
 
 	res, err := c.sendMessage(context.Background(), msg, c.remotePeerID)
 	if err != nil {
 		return ReceiveResponse{
-			Hash:   cidStr,
+			Cid:    id,
 			Status: StatusErrored,
 			Err:    fmt.Errorf("remote error: %s", err.Error()),
 		}
 	}
 
+	resCid, err := cid.Parse(res.Header("cid"))
+	if err != nil {
+		return ReceiveResponse{
+			Cid:    id,
+			Status: StatusErrored,
+			Err:    fmt.Errorf("receive block response didn't include well-formed CID header"),
+		}
+	}
+
 	rr := ReceiveResponse{
-		Hash: res.Header("cid"),
+		Cid: resCid,
 	}
 
 	if e := res.Header("error"); e != "" {
@@ -113,9 +123,9 @@ func (c *p2pClient) ReceiveBlock(sid, cidStr string, data []byte) ReceiveRespons
 
 // GetDagInfo asks the remote for info specified by a the root identifier
 // string of a DAG
-func (c *p2pClient) GetDagInfo(ctx context.Context, cidStr string, meta map[string]string) (info *dag.Info, err error) {
+func (c *p2pClient) GetDagInfo(ctx context.Context, id cid.Cid, meta map[string]string) (info *dag.Info, err error) {
 
-	headers := []string{"phase", "request", "cid", cidStr}
+	headers := []string{"phase", "request", "cid", id.String()}
 	for key, val := range meta {
 		headers = append(headers, key, val)
 	}
@@ -133,9 +143,9 @@ func (c *p2pClient) GetDagInfo(ctx context.Context, cidStr string, meta map[stri
 }
 
 // GetBlock gets a block of data from the remote
-func (c *p2pClient) GetBlock(ctx context.Context, cidStr string) (rawdata []byte, err error) {
+func (c *p2pClient) GetBlock(ctx context.Context, id cid.Cid) (rawdata []byte, err error) {
 	msg := p2putil.NewMessage(c.host.ID(), mtGetBlock, nil).WithHeaders(
-		"cid", cidStr,
+		"cid", id.String(),
 	)
 	res, err := c.sendMessage(ctx, msg, c.remotePeerID)
 	if err != nil {
@@ -145,8 +155,8 @@ func (c *p2pClient) GetBlock(ctx context.Context, cidStr string) (rawdata []byte
 }
 
 // RemoveCID asks the remote to remove a CID
-func (c *p2pClient) RemoveCID(ctx context.Context, cidStr string, meta map[string]string) (err error) {
-	headers := []string{"phase", "request", "cid", cidStr}
+func (c *p2pClient) RemoveCID(ctx context.Context, id cid.Cid, meta map[string]string) (err error) {
+	headers := []string{"phase", "request", "cid", id.String()}
 	for key, val := range meta {
 		headers = append(headers, key, val)
 	}
@@ -305,10 +315,13 @@ func (c *p2pHandler) HandleNewReceive(ws *p2putil.WrappedStream, msg p2putil.Mes
 func (c *p2pHandler) HandleReceiveBlock(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
 	if msg.Header("phase") == "request" {
 		sid := msg.Headers["sid"]
-		cidStr := msg.Headers["cid"]
-		rr := c.dsync.ReceiveBlock(sid, cidStr, msg.Body)
+		id, err := cid.Parse(msg.Headers["cid"])
+		if err != nil {
+			return true
+		}
+		rr := c.dsync.ReceiveBlock(sid, id, msg.Body)
 
-		var status, err string
+		var status, errString string
 		switch rr.Status {
 		case StatusErrored:
 			status = "errored"
@@ -319,14 +332,14 @@ func (c *p2pHandler) HandleReceiveBlock(ws *p2putil.WrappedStream, msg p2putil.M
 		}
 
 		if rr.Err != nil {
-			err = rr.Err.Error()
+			errString = rr.Err.Error()
 		}
 
 		res := msg.WithHeaders(
 			"phase", "response",
-			"cid", cidStr,
+			"cid", id.String(),
 			"status", status,
-			"error", err,
+			"error", errString,
 		)
 
 		if err := ws.SendMessage(res); err != nil {
@@ -339,7 +352,11 @@ func (c *p2pHandler) HandleReceiveBlock(ws *p2putil.WrappedStream, msg p2putil.M
 
 // HandleReqManifest asks the remote for a manifest specified by the root ID of a DAG
 func (c *p2pHandler) HandleReqManifest(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
-	cidStr := msg.Header("cid")
+	id, err := cid.Parse(msg.Header("cid"))
+	if err != nil {
+		return true
+	}
+
 	res := msg.WithHeaders("phase", "response")
 
 	meta := map[string]string{}
@@ -350,7 +367,7 @@ func (c *p2pHandler) HandleReqManifest(ws *p2putil.WrappedStream, msg p2putil.Me
 	}
 
 	// TODO (b5): pass a context into here
-	if di, err := c.dsync.GetDagInfo(context.Background(), cidStr, meta); err != nil {
+	if di, err := c.dsync.GetDagInfo(context.Background(), id, meta); err != nil {
 		res = res.WithHeaders("error", err.Error())
 	} else {
 		data, err := di.MarshalCBOR()
@@ -368,11 +385,15 @@ func (c *p2pHandler) HandleReqManifest(ws *p2putil.WrappedStream, msg p2putil.Me
 
 // HandleGetBlock gets a block from the remote
 func (c *p2pHandler) HandleGetBlock(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
-	cidStr := msg.Header("cid")
+	id, err := cid.Parse(msg.Header("cid"))
+	if err != nil {
+		return true
+	}
+
 	res := msg.WithHeaders("phase", "response")
 
 	// TODO (b5) - plumb a context in here
-	data, err := c.dsync.GetBlock(context.Background(), cidStr)
+	data, err := c.dsync.GetBlock(context.Background(), id)
 	if err != nil {
 		res = res.WithHeaders("error", err.Error())
 	} else {
@@ -389,7 +410,11 @@ func (c *p2pHandler) HandleGetBlock(ws *p2putil.WrappedStream, msg p2putil.Messa
 func (c *p2pHandler) HandleRemoveCID(ws *p2putil.WrappedStream, msg p2putil.Message) (hangup bool) {
 	if msg.Header("phase") == "request" {
 
-		cid := msg.Header("cid")
+		id, err := cid.Parse(msg.Header("cid"))
+		if err != nil {
+			return true
+		}
+
 		meta := map[string]string{}
 		for key, val := range msg.Headers {
 			if key != "pin" && key != "phase" {
@@ -399,10 +424,10 @@ func (c *p2pHandler) HandleRemoveCID(ws *p2putil.WrappedStream, msg p2putil.Mess
 
 		res := msg.WithHeaders(
 			"phase", "response",
-			"cid", cid,
+			"cid", id.String(),
 		)
 
-		if err := c.dsync.RemoveCID(context.Background(), cid, meta); err != nil {
+		if err := c.dsync.RemoveCID(context.Background(), id, meta); err != nil {
 			res = msg.WithHeaders("error", err.Error())
 		}
 

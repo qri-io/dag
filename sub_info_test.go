@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ipfs/go-cid"
 	ipld "github.com/ipfs/go-ipld-format"
 )
 
@@ -34,11 +35,11 @@ func TestInfoAtIndex(t *testing.T) {
 
 	expSubInfoAtC := &Info{
 		Manifest: &Manifest{
-			Nodes: []string{
-				"bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu", // c
-				"bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy", // d
-				"bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri", // e
-				"bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu", // f
+			Nodes: []cid.Cid{
+				mustCid("bafkreiguonpdujs6c3xoap2zogfzwxidagoapwfwyupzbwr2mzxoye5lgu"), // c
+				mustCid("bafkreicoa5aikyv63ofwbtqfyhpm7y5nc23semewpxqb6zalpzdstne7zy"), // d
+				mustCid("bafkreiclej3xpvg5d7dby34ij5egihicwtisdu75gkglbc2vgh6kzwv7ri"), // e
+				mustCid("bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu"), // f
 			},
 			Links: [][2]int{
 				{0, 1}, {0, 2}, {1, 3},
@@ -50,8 +51,8 @@ func TestInfoAtIndex(t *testing.T) {
 
 	expSubInfoAtF := &Info{
 		Manifest: &Manifest{
-			Nodes: []string{
-				"bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu", // f
+			Nodes: []cid.Cid{
+				mustCid("bafkreihpfujh3y33sqv2vudbixsuwddbtipsemt3f2547pwhr5kwjl7dtu"), // f
 			},
 			Links: [][2]int{},
 		},

@@ -2,6 +2,8 @@ package dag
 
 import (
 	"fmt"
+
+	"github.com/ipfs/go-cid"
 )
 
 // subDAGGenerator is the state machine used to get a subDAG from a DAG
@@ -148,7 +150,7 @@ func (i *Info) InfoAtIndex(idx int) (*Info, error) {
 
 // InfoAtID returns a sub-Info, the DAG, sizes, and labels,
 // with the given id as root of the DAG
-func (i *Info) InfoAtID(id string) (*Info, error) {
+func (i *Info) InfoAtID(id cid.Cid) (*Info, error) {
 	idx := i.Manifest.IDIndex(id)
 	if idx == -1 {
 		return nil, ErrIDNotFound

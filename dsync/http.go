@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 
@@ -18,8 +20,9 @@ import (
 )
 
 const (
-	httpDsyncProtocolIDHeader = "dsync-version"
-	sidHeader                 = "sid"
+	httpDsyncProtocolIDHeader  = "dsync-version"
+	sidHeader                  = "sid"
+	httpBlocksMultipartFormKey = "blocks"
 )
 
 const (
@@ -104,22 +107,40 @@ func (rem *HTTPClient) ProtocolVersion() (protocol.ID, error) {
 }
 
 // ReceiveBlocks writes a block stream as an HTTP PUT request to the remote
-func (rem *HTTPClient) ReceiveBlocks(ctx context.Context, sid string, r io.Reader) error {
+func (rem *HTTPClient) ReceiveBlocks(ctx context.Context, sid string, carReader io.Reader) error {
+	pipeR, pipeW := io.Pipe()
+	m := multipart.NewWriter(pipeW)
+	go func() {
+		defer pipeW.Close()
+		defer m.Close()
 
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s?sid=%s", rem.URL, sid), r)
+		part, err := m.CreateFormFile(httpBlocksMultipartFormKey, "archive.car")
+		if err != nil {
+			log.Debugw("error creating form file", "err", err)
+			return
+		}
+
+		n, err := io.Copy(part, carReader)
+		if err != nil {
+			log.Debugw("error copying car reader to multipart form file", "err", err)
+			return
+		}
+		log.Debugf("done writing form file. copied %d bytes", n)
+	}()
+
+	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s?sid=%s", rem.URL, sid), pipeR)
 	if err != nil {
-		log.Debugf("err creating %s HTTP request err=%q ", http.MethodPut, err)
+		log.Debugw("error creating HTTP request", "err", err)
 		return err
 	}
-	req.TransferEncoding = []string{"chunked"}
-	req.Header.Set("Content-Type", carMIMEType)
+	req.Header.Set("Content-Type", m.FormDataContentType())
 	// response body is only used for error reporting
 	req.Header.Set("Accept", binaryMIMEType)
 	req.Header.Set(httpDsyncProtocolIDHeader, string(DsyncProtocolID))
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Debugf("err doing HTTP request. err=%q", err)
+		log.Debugw("error doing HTTP request", "err", err)
 		return err
 	}
 
@@ -128,7 +149,7 @@ func (rem *HTTPClient) ReceiveBlocks(ctx context.Context, sid string, r io.Reade
 		if data, err := ioutil.ReadAll(res.Body); err == nil {
 			msg = string(data)
 		}
-		log.Debugf("error response from remote. err=%q", msg)
+		log.Debugw("error response from remote", "response", msg)
 		return fmt.Errorf("remote response: %d %s", res.StatusCode, msg)
 	}
 
@@ -336,7 +357,37 @@ func HTTPRemoteHandler(ds *Dsync) http.HandlerFunc {
 		case http.MethodPost:
 			createDsyncSession(ds, w, r)
 		case http.MethodPut:
-			if r.Header.Get("Content-Type") == carMIMEType {
+			mtype, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			if err != nil {
+				log.Debugw("bad media type", "err", err)
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(err.Error()))
+				return
+			}
+
+			switch mtype {
+			case "multipart/form-data":
+				log.Debugw("multipart params", "params", params, "sid", r.FormValue("sid"))
+				defer r.Body.Close()
+
+				prt, header, err := r.FormFile(httpBlocksMultipartFormKey)
+				if err != nil {
+					log.Debugw("error getting form file", "err", err)
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(err.Error()))
+					return
+				}
+
+				log.Debugw("reading block data", "prt", prt, "header", header)
+				if err := ds.ReceiveBlocks(r.Context(), r.FormValue("sid"), prt); err != nil {
+					log.Debugw("error reading multipart block stream", "err", err)
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(err.Error()))
+				}
+				w.WriteHeader(http.StatusOK)
+				return
+
+			case carMIMEType:
 				if err := ds.ReceiveBlocks(r.Context(), r.FormValue("sid"), r.Body); err != nil {
 					w.WriteHeader(http.StatusBadRequest)
 					w.Write([]byte(err.Error()))
@@ -504,6 +555,7 @@ func receiveBlockHTTP(ds *Dsync, w http.ResponseWriter, r *http.Request) {
 
 	resCid, err := cid.Parse(r.FormValue("hash"))
 	if err != nil {
+		log.Debugw("error parsing HTTP receive-block cid", "err", err)
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte("well-formed cid 'hash' value is required"))
 		return

@@ -442,12 +442,12 @@ func (ds *Dsync) ReceiveBlocks(ctx context.Context, sid string, r io.Reader) err
 	}
 
 	if err := sess.ReceiveBlocks(ctx, r); err != nil {
-		log.Debugf("error receiving blocks. err=%q", err)
+		log.Debugw("error accepting blocks", "err", err)
 		return err
 	}
 
 	if err := ds.finalizeReceive(sess); err != nil {
-		log.Debugf("error finalizing receive. err=%q", err)
+		log.Debugw("error finalizing receive", "err", err)
 		return err
 	}
 

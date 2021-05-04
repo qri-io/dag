@@ -1,3 +1,21 @@
+<a name="v0.2.2"></a>
+# [v0.2.2](https://github.com/qri-io/dag/compare/v0.2.1...v0.2.2) (2021-05-04)
+
+This patch release fixes some issues in dsync. Network errors are now retried, and blocks are pushed as large archive streams. Performance will improve and transfers will fail less often.
+
+### Bug Fixes
+
+* **dsync:** PROTOCOL_ERROR responses retry instead of failing ([e26737d](https://github.com/qri-io/dag/commit/e26737de2c39b2dca226cef0e95ce5a0ac6daf96))
+* **http:** always set request Accept & Content-Type res headers ([dc859f1](https://github.com/qri-io/dag/commit/dc859f1ddb1477d2b7a818403fe60aa07542e467))
+
+
+### Performance Improvements
+
+* **CARStream:** push blocks in one large CAR archive stream ([207f481](https://github.com/qri-io/dag/commit/207f4818cb3399f85d3a32d0147c25a7972925aa))
+* **dsync:** pull uses a stream interface over HTTP ([1704518](https://github.com/qri-io/dag/commit/170451873ad41fb9ade119d9c3edd27e9ffe89ab))
+
+
+
 <a name="v0.2.1"></a>
 # [v0.2.1](https://github.com/qri-io/dag/compare/v0.2.0...v0.2.1) (2020-06-29)
 

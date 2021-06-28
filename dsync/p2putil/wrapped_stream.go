@@ -4,8 +4,8 @@ import (
 	"bufio"
 
 	net "github.com/libp2p/go-libp2p-core/network"
-	multicodec "github.com/multiformats/go-multicodec"
-	json "github.com/multiformats/go-multicodec/json"
+	json "github.com/qri-io/dag/dsync/p2putil/json"
+	multicodec "github.com/qri-io/dag/dsync/p2putil/multicodec_old"
 )
 
 // HandlerFunc is the signature of a function that can handle p2p messages

@@ -12,7 +12,6 @@ import (
 	corebs "github.com/ipfs/go-ipfs/core/bootstrap"
 	coreapi "github.com/ipfs/go-ipfs/core/coreapi"
 	mock "github.com/ipfs/go-ipfs/core/mock"
-	"github.com/ipfs/go-ipfs/keystore"
 	"github.com/ipfs/go-ipfs/repo"
 	coreiface "github.com/ipfs/interface-go-ipfs-core"
 	ci "github.com/libp2p/go-libp2p-core/crypto"
@@ -71,7 +70,6 @@ func makeAPISwarm(ctx context.Context, fullIdentity bool, n int) ([]*core.IpfsNo
 		r := &repo.Mock{
 			C: c,
 			D: syncds.MutexWrap(datastore.NewMapDatastore()),
-			K: keystore.NewMemKeystore(),
 		}
 
 		node, err := core.NewNode(ctx, &core.BuildCfg{
